@@ -71,10 +71,8 @@ if not df_A.empty and not df_B.empty:
     st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
 
     resumen_desbaste = []
-    stdA = prodA.strip().upper()
-    stdB = prodB.strip().upper()
-    desbA = df_desbaste[df_desbaste["STD"].str.strip().str.upper() == stdA]
-    desbB = df_desbaste[df_desbaste["STD"].str.strip().str.upper() == stdB]
+    desbA = df_desbaste[df_desbaste["Familia"] == familiaA]
+    desbB = df_desbaste[df_desbaste["Familia"] == familiaB]
     comunes = set(desbA["Componente limpio"]).intersection(set(desbB["Componente limpio"]))
     for comp in comunes:
         valA = desbA[desbA["Componente limpio"] == comp]["Valor"].values[0]
@@ -87,7 +85,7 @@ if not df_A.empty and not df_B.empty:
             "¿Cambia?": "✅ Sí" if cambia else "❌ No"
         })
     df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
-    st.markdown("### 🧠 Comparación Diagrama Desbaste")
+    st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
     tiempo_exacto = df_tiempo[
