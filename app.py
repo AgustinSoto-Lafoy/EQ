@@ -80,6 +80,19 @@ with tabs[0]:
     df_B = df_famB[df_famB["Producto"] == productoB]
 
     if not df_A.empty and not df_B.empty:
+        # Mostrar tiempo de cambio si existe
+        prodA_norm = productoA.strip().upper()
+        prodB_norm = productoB.strip().upper()
+        tiempo_exacto = df_tiempo[
+            (df_tiempo["Producto Origen STD"] == prodA_norm) &
+            (df_tiempo["Producto Destino STD"] == prodB_norm)
+        ]["Minutos de Cambio"].values
+
+        if len(tiempo_exacto) > 0:
+            st.success(f"⏱️ Tiempo estimado de cambio: {tiempo_exacto[0]} minutos")
+        else:
+            st.warning("No se encontró tiempo de cambio registrado entre estos productos.")
+
         columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
         resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
 
