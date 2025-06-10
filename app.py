@@ -56,24 +56,24 @@ def resaltar_filas(row):
     return [color] * len(row)
 
 st.subheader("🔄 Comparador Manual de Productos")
-familias = sorted(df_ddp["Familia"].dropna().unique())
+familias = ["(Todos)"] + sorted(df_ddp["Familia"].dropna().unique())
 colf1, colf2 = st.columns(2)
 with colf1:
     familiaA = st.selectbox("Selecciona Familia A", familias, key="famA")
 with colf2:
     familiaB = st.selectbox("Selecciona Familia B", familias, key="famB")
 
-df_famA = df_ddp[df_ddp["Familia"] == familiaA]
-df_famB = df_ddp[df_ddp["Familia"] == familiaB]
+df_famA = df_ddp if familiaA == "(Todos)" else df_ddp[df_ddp["Familia"] == familiaA]
+df_famB = df_ddp if familiaB == "(Todos)" else df_ddp[df_ddp["Familia"] == familiaB]
 
 productosA = sorted(df_famA["Producto"].dropna().unique())
 productosB = sorted(df_famB["Producto"].dropna().unique())
 
 colA, colB = st.columns(2)
 with colA:
-    productoA = st.selectbox("Selecciona Producto A", productosA, key="A")
+    productoA = st.selectbox("Selecciona Producto A", productosA, key="A", index=0)
 with colB:
-    productoB = st.selectbox("Selecciona Producto B", productosB, key="B")
+    productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
 
 # Obtener STD desde nombre del producto seleccionado
 df_A = df_famA[df_famA["Producto"] == productoA]
@@ -87,8 +87,9 @@ if not df_A.empty and not df_B.empty:
     st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
 
     resumen_desbaste = []
-    desbA = df_desbaste[df_desbaste["Familia"] == familiaA]
-    desbB = df_desbaste[df_desbaste["Familia"] == familiaB]
+    desbA = df_desbaste[df_desbaste["Familia"] == familiaA] if familiaA != "(Todos)" else df_desbaste
+    desbB = df_desbaste[df_desbaste["Familia"] == familiaB] if familiaB != "(Todos)" else df_desbaste
+
     pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
     for substd, comp in pares:
         val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
