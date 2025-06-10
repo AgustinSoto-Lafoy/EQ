@@ -18,23 +18,28 @@ df_ddp, df_mapa, df_tiempo, df_desbaste = cargar_datos_estaticos()
 st.sidebar.header(":page_facing_up: Subida de Programa")
 file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["xlsx"])
 
-def comparar_productos(df_origen, df_destino, columnas):
+def comparar_productos_por_posicion(dfA, dfB, columnas):
     resumen = []
-    for col in columnas:
-        val1 = df_origen.iloc[0].get(col, "")
-        val2 = df_destino.iloc[0].get(col, "")
-        val1 = None if pd.isna(val1) or val1 == "None" else val1
-        val2 = None if pd.isna(val2) or val2 == "None" else val2
-        if val1 is None and val2 is None:
-            cambia = False
-        else:
-            cambia = val1 != val2
-        resumen.append({
-            "Variable Técnica": col,
-            "Producto A": val1,
-            "Producto B": val2,
-            "¿Cambia?": "✅ Sí" if cambia else "❌ No"
-        })
+    posiciones = sorted(set(dfA["STD"]).union(set(dfB["STD"])))
+    for pos in posiciones:
+        filaA = dfA[dfA["STD"] == pos]
+        filaB = dfB[dfB["STD"] == pos]
+        for col in columnas:
+            valA = filaA[col].values[0] if not filaA.empty and col in filaA else None
+            valB = filaB[col].values[0] if not filaB.empty and col in filaB else None
+            valA = None if pd.isna(valA) or valA == "None" else valA
+            valB = None if pd.isna(valB) or valB == "None" else valB
+            if valA is None and valB is None:
+                cambia = False
+            else:
+                cambia = valA != valB
+            resumen.append({
+                "Posición": pos,
+                "Componente": col,
+                "Valor A": valA,
+                "Valor B": valB,
+                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
+            })
     return pd.DataFrame(resumen)
 
 def resaltar_filas(row):
@@ -66,13 +71,10 @@ df_A = df_famA[df_famA["Producto"] == productoA]
 df_B = df_famB[df_famB["Producto"] == productoB]
 
 if not df_A.empty and not df_B.empty:
-    stdA = df_A.iloc[0]["STD"]
-    stdB = df_B.iloc[0]["STD"]
+    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
+    resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
 
-    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto"]]
-    resumen_ddp = comparar_productos(df_A, df_B, columnas_ddp)
-
-    st.markdown("### 🔢 Diferencias en Condiciones Técnicas (DDP)")
+    st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
     st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
 
     resumen_desbaste = []
@@ -93,6 +95,8 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
+    stdA = df_A.iloc[0]["STD"]
+    stdB = df_B.iloc[0]["STD"]
     tiempo_exacto = df_tiempo[
         (df_tiempo["Producto Origen STD"] == stdA) &
         (df_tiempo["Producto Destino STD"] == stdB)
