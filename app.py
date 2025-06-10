@@ -99,13 +99,20 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-    # Buscar tiempo directamente por nombre de producto
+    # Normalizar columnas y productos para comparación robusta
+    df_tiempo["Producto Origen STD"] = df_tiempo["Producto Origen STD"].astype(str).str.strip().str.upper()
+    df_tiempo["Producto Destino STD"] = df_tiempo["Producto Destino STD"].astype(str).str.strip().str.upper()
+    prodA_norm = productoA.strip().upper()
+    prodB_norm = productoB.strip().upper()
+
     st.write("🔍 Debug: Producto A:", productoA)
     st.write("🔍 Debug: Producto B:", productoB)
+    st.write("🔍 Debug: Producto A Normalizado:", prodA_norm)
+    st.write("🔍 Debug: Producto B Normalizado:", prodB_norm)
 
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen STD"].str.strip() == productoA) &
-        (df_tiempo["Producto Destino STD"].str.strip() == productoB)
+        (df_tiempo["Producto Origen STD"] == prodA_norm) &
+        (df_tiempo["Producto Destino STD"] == prodB_norm)
     ]["Minutos de Cambio"].values
 
     st.write("🔍 Debug: Resultado tiempo_exacto:", tiempo_exacto)
