@@ -50,7 +50,7 @@ def generar_excel(df):
 def analizar_secuencia(programa, mapa, ddp, tiempo):
     st.subheader("🔀 Análisis de Secuencia de Cambios")
 
-    # Homologar productos
+    # Homologar productos en el programa
     programa = programa.merge(mapa, left_on="DESCRIPCIÓN", right_on="Producto Limpio", how="left")
     programa = programa.sort_values(by="INICIO")
     programa["Producto STD"] = programa["Producto STD"].fillna("Sin homologar")
@@ -67,11 +67,11 @@ def analizar_secuencia(programa, mapa, ddp, tiempo):
         minutos = match["Minutos de Cambio"].mean() if not match.empty else "Sin datos"
 
         # Comparar condiciones
-        df_origen = ddp[ddp["Nombre STD"] == origen]
-        df_destino = ddp[ddp["Nombre STD"] == destino]
+        df_origen = ddp[ddp["STD"] == origen]
+        df_destino = ddp[ddp["STD"] == destino]
         cambios_tecnicos = 0
         if not df_origen.empty and not df_destino.empty:
-            columnas_tecnicas = [col for col in df_origen.columns if col not in ["Producto STD", "Nombre STD"]]
+            columnas_tecnicas = [col for col in df_origen.columns if col not in ["STD", "Producto"]]
             diferencias = comparar_productos(df_origen, df_destino, columnas_tecnicas)
             cambios_tecnicos = diferencias[diferencias["¿Cambia?"] == "✅ Sí"].shape[0]
 
