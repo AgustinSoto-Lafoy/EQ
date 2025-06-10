@@ -10,13 +10,15 @@ def cargar_datos_estaticos():
     ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
+
+    # Normalizar columnas de cruce directamente al cargar
+    for col in ["Producto Origen STD", "Producto Destino STD"]:
+        tiempo[col] = tiempo[col].astype(str).str.strip().str.upper()
+    ddp["Producto"] = ddp["Producto"].astype(str).str.strip().str.upper()
+
     return ddp, tiempo, desbaste
 
 df_ddp, df_tiempo, df_desbaste = cargar_datos_estaticos()
-
-# Normalizar columnas de cruce
-for col in ["Producto Origen STD", "Producto Destino STD"]:
-    df_tiempo[col] = df_tiempo[col].astype(str).str.strip().str.upper()
 
 st.sidebar.header(":page_facing_up: Subida de Programa")
 file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["xlsx"])
@@ -103,13 +105,9 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-    # Normalizar productos seleccionados
-    prodA_norm = str(productoA).strip().upper()
-    prodB_norm = str(productoB).strip().upper()
-
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen STD"] == prodA_norm) &
-        (df_tiempo["Producto Destino STD"] == prodB_norm)
+        (df_tiempo["Producto Origen STD"] == productoA) &
+        (df_tiempo["Producto Destino STD"] == productoB)
     ]["Minutos de Cambio"].values
 
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
