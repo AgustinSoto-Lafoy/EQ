@@ -84,6 +84,8 @@ if not df_A.empty and not df_B.empty:
     resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
 
     st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
+    if st.checkbox("Mostrar solo componentes que cambian (DDP)", value=False):
+        resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
     st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
 
     resumen_desbaste = []
@@ -106,4 +108,13 @@ if not df_A.empty and not df_B.empty:
         })
     df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
     st.markdown("### 🧠 Comparación Diagrama Desbaste (todas las posiciones)")
+    if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
+        df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
+
+    # Mostrar estadísticas de cambios por categoría general
+    st.markdown("### 📊 Resumen de Cambios Técnicos")
+    resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
+    conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
+    conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
+    st.dataframe(conteo_por_componente)
