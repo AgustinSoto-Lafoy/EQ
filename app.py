@@ -70,7 +70,7 @@ if not df_A.empty and not df_B.empty:
     resumen_ddp = comparar_productos(df_A, df_B, columnas_ddp)
 
     st.markdown("### 🔢 Diferencias en Condiciones Técnicas (DDP)")
-    st.dataframe(resumen_ddp.style.apply(resaltar_filas, axis=1))
+    st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
 
     st.download_button(
         "📄 Descargar Comparación DDP",
@@ -98,7 +98,7 @@ if not df_A.empty and not df_B.empty:
             })
 
         df_desbaste_cmp = pd.DataFrame(comparaciones)
-        st.dataframe(df_desbaste_cmp.style.apply(resaltar_filas, axis=1))
+        st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
         st.download_button(
             "📄 Descargar Comparación Desbaste",
@@ -141,7 +141,7 @@ def analizar_secuencia(programa, mapa, ddp, tiempo):
         })
 
     df_cambios = pd.DataFrame(cambios)
-    st.dataframe(df_cambios)
+    st.dataframe(df_cambios.astype(str))
 
     if not df_cambios.empty:
         st.download_button(
