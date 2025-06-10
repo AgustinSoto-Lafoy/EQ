@@ -107,9 +107,15 @@ if not df_A.empty and not df_B.empty:
     prod_std_A = df_A.iloc[0]["Producto STD"] if "Producto STD" in df_A.columns else None
     prod_std_B = df_B.iloc[0]["Producto STD"] if "Producto STD" in df_B.columns else None
 
+    st.write("🔍 Debug: Producto STD A:", prod_std_A)
+    st.write("🔍 Debug: Producto STD B:", prod_std_B)
+
     tiempo_exacto = df_tiempo[
         (df_tiempo["Producto Origen STD"].str.strip() == prod_std_A) &
         (df_tiempo["Producto Destino STD"].str.strip() == prod_std_B)
     ]["Minutos de Cambio"].values
+    
+    st.write("🔍 Debug: Resultado tiempo_exacto:", tiempo_exacto)
+
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
     st.success(f"Tiempo estimado de cambio: {tiempo_str} minutos")
