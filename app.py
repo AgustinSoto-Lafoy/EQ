@@ -11,7 +11,6 @@ def cargar_datos_estaticos():
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
 
-    # Normalizar columnas de cruce directamente al cargar
     for col in ["Producto Origen STD", "Producto Destino STD"]:
         tiempo[col] = tiempo[col].astype(str).str.strip().str.upper()
     ddp["Producto"] = ddp["Producto"].astype(str).str.strip().str.upper()
@@ -90,25 +89,20 @@ if not df_A.empty and not df_B.empty:
     resumen_desbaste = []
     desbA = df_desbaste[df_desbaste["Familia"] == familiaA]
     desbB = df_desbaste[df_desbaste["Familia"] == familiaB]
-    comunes = set(desbA["Componente limpio"]).intersection(set(desbB["Componente limpio"]))
-    for comp in comunes:
-        val1 = desbA[desbA["Componente limpio"] == comp]["Valor"].values[0]
-        val2 = desbB[desbB["Componente limpio"] == comp]["Valor"].values[0]
+    pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
+    for substd, comp in pares:
+        val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
+        val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
+        val1 = val1[0] if len(val1) > 0 else None
+        val2 = val2[0] if len(val2) > 0 else None
         cambia = val1 != val2 and not (pd.isna(val1) and pd.isna(val2))
         resumen_desbaste.append({
+            "Posición": substd,
             "Componente": comp,
             "Valor A": val1,
             "Valor B": val2,
             "¿Cambia?": "✅ Sí" if cambia else "❌ No"
         })
     df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
-    st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
+    st.markdown("### 🧠 Comparación Diagrama Desbaste (todas las posiciones)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
-
-    tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen STD"] == productoA) &
-        (df_tiempo["Producto Destino STD"] == productoB)
-    ]["Minutos de Cambio"].values
-
-    tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
-    st.success(f"Tiempo estimado de cambio: {tiempo_str} minutos")
