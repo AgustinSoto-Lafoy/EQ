@@ -20,7 +20,12 @@ file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["x
 
 def comparar_productos_por_posicion(dfA, dfB, columnas):
     resumen = []
-    posiciones = sorted(set(dfA["STD"]).union(set(dfB["STD"])))
+    posiciones = sorted(set(dfA["STD"]).union(set(dfB["STD"])), key=lambda x: (
+        0 if x == "DU" else
+        int(x[1]) if x.startswith("M") else
+        10 + int(x[1]) if x.startswith("A") else
+        99
+    ))
     for pos in posiciones:
         filaA = dfA[dfA["STD"] == pos]
         filaB = dfB[dfB["STD"] == pos]
