@@ -100,11 +100,10 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-    stdA = df_A.iloc[0]["STD"]
-    stdB = df_B.iloc[0]["STD"]
+    # Buscar tiempo de cambio por nombre de producto
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen STD"] == stdA) &
-        (df_tiempo["Producto Destino STD"] == stdB)
+        (df_tiempo["Producto Origen"].str.strip() == productoA) &
+        (df_tiempo["Producto Destino"].str.strip() == productoB)
     ]["Minutos de Cambio"].values
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
     st.success(f"Tiempo estimado de cambio: {tiempo_str} minutos")
