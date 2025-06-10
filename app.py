@@ -27,12 +27,17 @@ def comparar_productos(df_origen, df_destino, columnas):
     for col in columnas:
         val1 = df_origen.iloc[0].get(col, "")
         val2 = df_destino.iloc[0].get(col, "")
-        distinto = val1 != val2
+        val1 = None if pd.isna(val1) or val1 == "None" else val1
+        val2 = None if pd.isna(val2) or val2 == "None" else val2
+        if val1 is None and val2 is None:
+            cambia = False
+        else:
+            cambia = val1 != val2
         resumen.append({
             "Variable Técnica": col,
             "Producto A": val1,
             "Producto B": val2,
-            "¿Cambia?": "✅ Sí" if distinto else "❌ No"
+            "¿Cambia?": "✅ Sí" if cambia else "❌ No"
         })
     return pd.DataFrame(resumen)
 
@@ -49,7 +54,7 @@ def generar_excel(df):
 
 # Comparador manual de productos
 st.subheader("🔄 Comparador Manual de Productos")
-productos_disponibles = sorted(df_ddp["STD"].dropna().unique())
+productos_disponibles = sorted(df_mapa["Producto STD"].dropna().unique())
 colA, colB = st.columns(2)
 with colA:
     prodA = st.selectbox("Selecciona Producto A", productos_disponibles, key="A")
@@ -67,7 +72,6 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🔢 Diferencias en Condiciones Técnicas (DDP)")
     st.dataframe(resumen_ddp.style.apply(resaltar_filas, axis=1))
 
-    # Exportar resumen DDP
     st.download_button(
         "📄 Descargar Comparación DDP",
         data=generar_excel(resumen_ddp),
@@ -75,7 +79,6 @@ if not df_A.empty and not df_B.empty:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Detalles Desbaste con doble clic simulado
     if st.toggle("🔍 Ver detalles Desbaste"):
         st.markdown("### 🧠 Comparación Diagrama Desbaste")
         desbA = df_desbaste[df_desbaste["STD"] == prodA]
@@ -86,11 +89,12 @@ if not df_A.empty and not df_B.empty:
         for comp in comunes:
             valA = desbA[desbA["Componente limpio"] == comp]["Valor"].values[0]
             valB = desbB[desbB["Componente limpio"] == comp]["Valor"].values[0]
+            cambia = valA != valB and not (pd.isna(valA) and pd.isna(valB))
             comparaciones.append({
                 "Componente": comp,
                 "Valor A": valA,
                 "Valor B": valB,
-                "¿Cambia?": "✅ Sí" if valA != valB else "❌ No"
+                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
             })
 
         df_desbaste_cmp = pd.DataFrame(comparaciones)
