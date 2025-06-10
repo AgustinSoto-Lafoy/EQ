@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from fpdf import FPDF
 
 st.set_page_config(page_title="Cambio de Producto", layout="wide")
 st.title("🔧 Plataforma de Cambio de Producto – Laminador")
@@ -42,48 +41,24 @@ def resaltar_filas(row):
     color = 'background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else ''
     return [color] * len(row)
 
-def generar_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Resumen')
-    output.seek(0)
-    return output
-
-def exportar_pdf(resumen_ddp, resumen_desbaste, prodA, prodB, tiempo_str):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, f"Comparador de Productos: {prodA} vs {prodB}", ln=True)
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 10, f"Tiempo estimado de cambio: {tiempo_str} minutos", ln=True)
-
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 10, "\nDiferencias en Condiciones Técnicas (DDP):", ln=True)
-    pdf.set_font("Arial", '', 9)
-    for _, row in resumen_ddp.iterrows():
-        pdf.cell(0, 8, f"{row['Variable Técnica']}: {row['Producto A']} vs {row['Producto B']} - {row['¿Cambia?']}", ln=True)
-
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 10, "\nComparación Desbaste:", ln=True)
-    pdf.set_font("Arial", '', 9)
-    for _, row in resumen_desbaste.iterrows():
-        pdf.cell(0, 8, f"{row['Componente']}: {row['Valor A']} vs {row['Valor B']} - {row['¿Cambia?']}", ln=True)
-
-    buffer = BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer
-
 st.subheader("🔄 Comparador Manual de Productos")
 familias = sorted(df_ddp["Familia"].dropna().unique())
-selected_fam = st.selectbox("Selecciona Familia", familias)
-df_filtro = df_ddp[df_ddp["Familia"] == selected_fam]
-productos_disponibles = sorted(df_filtro["STD"].dropna().unique())
+colf1, colf2 = st.columns(2)
+with colf1:
+    familiaA = st.selectbox("Selecciona Familia A", familias, key="famA")
+with colf2:
+    familiaB = st.selectbox("Selecciona Familia B", familias, key="famB")
+
+df_famA = df_ddp[df_ddp["Familia"] == familiaA]
+df_famB = df_ddp[df_ddp["Familia"] == familiaB]
+productosA = sorted(df_famA["STD"].dropna().unique())
+productosB = sorted(df_famB["STD"].dropna().unique())
+
 colA, colB = st.columns(2)
 with colA:
-    prodA = st.selectbox("Selecciona Producto A", productos_disponibles, key="A")
+    prodA = st.selectbox("Selecciona Producto A", productosA, key="A")
 with colB:
-    prodB = st.selectbox("Selecciona Producto B", productos_disponibles, key="B")
+    prodB = st.selectbox("Selecciona Producto B", productosB, key="B")
 
 df_A = df_ddp[df_ddp["STD"] == prodA]
 df_B = df_ddp[df_ddp["STD"] == prodB]
@@ -96,8 +71,10 @@ if not df_A.empty and not df_B.empty:
     st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
 
     resumen_desbaste = []
-    desbA = df_desbaste[df_desbaste["STD"] == prodA]
-    desbB = df_desbaste[df_desbaste["STD"] == prodB]
+    stdA = prodA.strip().upper()
+    stdB = prodB.strip().upper()
+    desbA = df_desbaste[df_desbaste["STD"].str.strip().str.upper() == stdA]
+    desbB = df_desbaste[df_desbaste["STD"].str.strip().str.upper() == stdB]
     comunes = set(desbA["Componente limpio"]).intersection(set(desbB["Componente limpio"]))
     for comp in comunes:
         valA = desbA[desbA["Componente limpio"] == comp]["Valor"].values[0]
@@ -119,11 +96,3 @@ if not df_A.empty and not df_B.empty:
     ]["Minutos de Cambio"].values
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
     st.success(f"Tiempo estimado de cambio: {tiempo_str} minutos")
-
-    pdf_bytes = exportar_pdf(resumen_ddp, df_desbaste_cmp, prodA, prodB, tiempo_str)
-    st.download_button(
-        "🔒 Exportar Comparación a PDF",
-        data=pdf_bytes,
-        file_name=f"Comparador_{prodA}_vs_{prodB}.pdf",
-        mime="application/pdf"
-    )
