@@ -51,19 +51,24 @@ with colf2:
 
 df_famA = df_ddp[df_ddp["Familia"] == familiaA]
 df_famB = df_ddp[df_ddp["Familia"] == familiaB]
-productosA = sorted(df_famA["STD"].dropna().unique())
-productosB = sorted(df_famB["STD"].dropna().unique())
+
+productosA = sorted(df_famA["Producto"].dropna().unique())
+productosB = sorted(df_famB["Producto"].dropna().unique())
 
 colA, colB = st.columns(2)
 with colA:
-    prodA = st.selectbox("Selecciona Producto A", productosA, key="A")
+    productoA = st.selectbox("Selecciona Producto A", productosA, key="A")
 with colB:
-    prodB = st.selectbox("Selecciona Producto B", productosB, key="B")
+    productoB = st.selectbox("Selecciona Producto B", productosB, key="B")
 
-df_A = df_ddp[df_ddp["STD"] == prodA]
-df_B = df_ddp[df_ddp["STD"] == prodB]
+# Obtener STD desde nombre del producto seleccionado
+df_A = df_famA[df_famA["Producto"] == productoA]
+df_B = df_famB[df_famB["Producto"] == productoB]
 
 if not df_A.empty and not df_B.empty:
+    stdA = df_A.iloc[0]["STD"]
+    stdB = df_B.iloc[0]["STD"]
+
     columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto"]]
     resumen_ddp = comparar_productos(df_A, df_B, columnas_ddp)
 
@@ -75,13 +80,13 @@ if not df_A.empty and not df_B.empty:
     desbB = df_desbaste[df_desbaste["Familia"] == familiaB]
     comunes = set(desbA["Componente limpio"]).intersection(set(desbB["Componente limpio"]))
     for comp in comunes:
-        valA = desbA[desbA["Componente limpio"] == comp]["Valor"].values[0]
-        valB = desbB[desbB["Componente limpio"] == comp]["Valor"].values[0]
-        cambia = valA != valB and not (pd.isna(valA) and pd.isna(valB))
+        val1 = desbA[desbA["Componente limpio"] == comp]["Valor"].values[0]
+        val2 = desbB[desbB["Componente limpio"] == comp]["Valor"].values[0]
+        cambia = val1 != val2 and not (pd.isna(val1) and pd.isna(val2))
         resumen_desbaste.append({
             "Componente": comp,
-            "Valor A": valA,
-            "Valor B": valB,
+            "Valor A": val1,
+            "Valor B": val2,
             "¿Cambia?": "✅ Sí" if cambia else "❌ No"
         })
     df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
@@ -89,8 +94,8 @@ if not df_A.empty and not df_B.empty:
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen STD"] == prodA) &
-        (df_tiempo["Producto Destino STD"] == prodB)
+        (df_tiempo["Producto Origen STD"] == stdA) &
+        (df_tiempo["Producto Destino STD"] == stdB)
     ]["Minutos de Cambio"].values
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
     st.success(f"Tiempo estimado de cambio: {tiempo_str} minutos")
