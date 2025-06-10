@@ -3,7 +3,6 @@ import pandas as pd
 from io import BytesIO
 
 st.set_page_config(page_title="Cambio de Producto", layout="wide")
-st.title("🔧 Plataforma de Cambio de Producto – Laminador")
 
 @st.cache_data
 def cargar_datos_estaticos():
@@ -19,102 +18,106 @@ def cargar_datos_estaticos():
 
 df_ddp, df_tiempo, df_desbaste = cargar_datos_estaticos()
 
-st.sidebar.header(":page_facing_up: Subida de Programa")
-file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["xlsx"])
+tabs = st.tabs(["🆚 Comparador de Productos", "📋 Secuencia de Programa"])
 
-def comparar_productos_por_posicion(dfA, dfB, columnas):
-    resumen = []
-    posiciones = sorted(set(dfA["STD"]).union(set(dfB["STD"])), key=lambda x: (
-        0 if x == "DU" else
-        int(x[1]) if x.startswith("M") else
-        10 + int(x[1]) if x.startswith("A") else
-        99
-    ))
-    for pos in posiciones:
-        filaA = dfA[dfA["STD"] == pos]
-        filaB = dfB[dfB["STD"] == pos]
-        for col in columnas:
-            valA = filaA[col].values[0] if not filaA.empty and col in filaA else None
-            valB = filaB[col].values[0] if not filaB.empty and col in filaB else None
-            valA = None if pd.isna(valA) or valA == "None" else valA
-            valB = None if pd.isna(valB) or valB == "None" else valB
-            if valA is None and valB is None:
-                cambia = False
-            else:
-                cambia = valA != valB
-            resumen.append({
-                "Posición": pos,
-                "Componente": col,
-                "Valor A": valA,
-                "Valor B": valB,
+with tabs[0]:
+    st.title("🔧 Plataforma de Cambio de Producto – Laminador")
+    st.subheader("🔄 Comparador Manual de Productos")
+
+    familias = ["(Todos)"] + sorted(df_ddp["Familia"].dropna().unique())
+    colf1, colf2 = st.columns(2)
+    with colf1:
+        familiaA = st.selectbox("Selecciona Familia A", familias, key="famA")
+    with colf2:
+        familiaB = st.selectbox("Selecciona Familia B", familias, key="famB")
+
+    df_famA = df_ddp if familiaA == "(Todos)" else df_ddp[df_ddp["Familia"] == familiaA]
+    df_famB = df_ddp if familiaB == "(Todos)" else df_ddp[df_ddp["Familia"] == familiaB]
+
+    productosA = sorted(df_famA["Producto"].dropna().unique())
+    productosB = sorted(df_famB["Producto"].dropna().unique())
+
+    colA, colB = st.columns(2)
+    with colA:
+        productoA = st.selectbox("Selecciona Producto A", productosA, key="A", index=0)
+    with colB:
+        productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
+
+    def comparar_productos_por_posicion(dfA, dfB, columnas):
+        resumen = []
+        posiciones = sorted(set(dfA["STD"]).union(set(dfB["STD"])), key=lambda x: (
+            0 if x == "DU" else
+            int(x[1]) if x.startswith("M") else
+            10 + int(x[1]) if x.startswith("A") else
+            99
+        ))
+        for pos in posiciones:
+            filaA = dfA[dfA["STD"] == pos]
+            filaB = dfB[dfB["STD"] == pos]
+            for col in columnas:
+                valA = filaA[col].values[0] if not filaA.empty and col in filaA else None
+                valB = filaB[col].values[0] if not filaB.empty and col in filaB else None
+                valA = None if pd.isna(valA) or valA == "None" else valA
+                valB = None if pd.isna(valB) or valB == "None" else valB
+                if valA is None and valB is None:
+                    cambia = False
+                else:
+                    cambia = valA != valB
+                resumen.append({
+                    "Posición": pos,
+                    "Componente": col,
+                    "Valor A": valA,
+                    "Valor B": valB,
+                    "¿Cambia?": "✅ Sí" if cambia else "❌ No"
+                })
+        return pd.DataFrame(resumen)
+
+    def resaltar_filas(row):
+        color = 'background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else ''
+        return [color] * len(row)
+
+    df_A = df_famA[df_famA["Producto"] == productoA]
+    df_B = df_famB[df_famB["Producto"] == productoB]
+
+    if not df_A.empty and not df_B.empty:
+        columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
+        resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
+
+        st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
+        if st.checkbox("Mostrar solo componentes que cambian (DDP)", value=False):
+            resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
+        st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
+
+        resumen_desbaste = []
+        desbA = df_desbaste[df_desbaste["Familia"] == familiaA] if familiaA != "(Todos)" else df_desbaste
+        desbB = df_desbaste[df_desbaste["Familia"] == familiaB] if familiaB != "(Todos)" else df_desbaste
+
+        pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
+        for substd, comp in pares:
+            val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
+            val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
+            val1 = val1[0] if len(val1) > 0 else None
+            val2 = val2[0] if len(val2) > 0 else None
+            cambia = val1 != val2 and not (pd.isna(val1) and pd.isna(val2))
+            resumen_desbaste.append({
+                "Posición": substd,
+                "Componente": comp,
+                "Valor A": val1,
+                "Valor B": val2,
                 "¿Cambia?": "✅ Sí" if cambia else "❌ No"
             })
-    return pd.DataFrame(resumen)
+        df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
+        st.markdown("### 🧠 Comparación Diagrama Desbaste (todas las posiciones)")
+        if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
+            df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
+        st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-def resaltar_filas(row):
-    color = 'background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else ''
-    return [color] * len(row)
+        st.markdown("### 📊 Resumen de Cambios Técnicos")
+        resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
+        conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
+        conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
+        st.dataframe(conteo_por_componente)
 
-st.subheader("🔄 Comparador Manual de Productos")
-familias = ["(Todos)"] + sorted(df_ddp["Familia"].dropna().unique())
-colf1, colf2 = st.columns(2)
-with colf1:
-    familiaA = st.selectbox("Selecciona Familia A", familias, key="famA")
-with colf2:
-    familiaB = st.selectbox("Selecciona Familia B", familias, key="famB")
-
-df_famA = df_ddp if familiaA == "(Todos)" else df_ddp[df_ddp["Familia"] == familiaA]
-df_famB = df_ddp if familiaB == "(Todos)" else df_ddp[df_ddp["Familia"] == familiaB]
-
-productosA = sorted(df_famA["Producto"].dropna().unique())
-productosB = sorted(df_famB["Producto"].dropna().unique())
-
-colA, colB = st.columns(2)
-with colA:
-    productoA = st.selectbox("Selecciona Producto A", productosA, key="A", index=0)
-with colB:
-    productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
-
-# Obtener STD desde nombre del producto seleccionado
-df_A = df_famA[df_famA["Producto"] == productoA]
-df_B = df_famB[df_famB["Producto"] == productoB]
-
-if not df_A.empty and not df_B.empty:
-    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
-    resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
-
-    st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
-    if st.checkbox("Mostrar solo componentes que cambian (DDP)", value=False):
-        resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
-    st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
-
-    resumen_desbaste = []
-    desbA = df_desbaste[df_desbaste["Familia"] == familiaA] if familiaA != "(Todos)" else df_desbaste
-    desbB = df_desbaste[df_desbaste["Familia"] == familiaB] if familiaB != "(Todos)" else df_desbaste
-
-    pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
-    for substd, comp in pares:
-        val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
-        val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
-        val1 = val1[0] if len(val1) > 0 else None
-        val2 = val2[0] if len(val2) > 0 else None
-        cambia = val1 != val2 and not (pd.isna(val1) and pd.isna(val2))
-        resumen_desbaste.append({
-            "Posición": substd,
-            "Componente": comp,
-            "Valor A": val1,
-            "Valor B": val2,
-            "¿Cambia?": "✅ Sí" if cambia else "❌ No"
-        })
-    df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
-    st.markdown("### 🧠 Comparación Diagrama Desbaste (todas las posiciones)")
-    if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
-        df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
-    st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
-
-    # Mostrar estadísticas de cambios por categoría general
-    st.markdown("### 📊 Resumen de Cambios Técnicos")
-    resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
-    conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
-    conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
-    st.dataframe(conteo_por_componente)
+with tabs[1]:
+    st.title("📋 Análisis de Secuencia de Programa")
+    st.info("Aquí podrás analizar los cambios de producto según el programa cargado. (En desarrollo)")
