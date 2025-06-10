@@ -6,14 +6,21 @@ from io import BytesIO
 st.set_page_config(page_title="Cambio de Producto", layout="wide")
 st.title("🔧 Plataforma de Cambio de Producto – Laminador")
 
-# Sidebar - Subida de archivos
-st.sidebar.header("📁 Subida de Archivos")
-file_ddp = st.sidebar.file_uploader("Cargar Consolidado Laminador (DDP)", type=["xlsx"])
-file_tiempo = st.sidebar.file_uploader("Cargar Base Tiempo de Cambio", type=["xlsx"])
-file_homologacion = st.sidebar.file_uploader("Cargar Mapa Homologación", type=["xlsx"])
-file_programa = st.sidebar.file_uploader("Cargar Programa Producción", type=["xlsx"])
+# Cargar archivos estáticos desde /data
+@st.cache_data
+def cargar_datos_estaticos():
+    ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
+    mapa = pd.read_excel("data/Mapa_Homologacion_Producto.xlsx")
+    tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
+    return ddp, mapa, tiempo
 
-# Función para comparar productos
+df_ddp, df_mapa, df_tiempo = cargar_datos_estaticos()
+
+# Sidebar: Cargar archivo de Programa
+st.sidebar.header(":page_facing_up: Subida de Programa")
+file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["xlsx"])
+
+# Funciones auxiliares
 def comparar_productos(df_origen, df_destino, columnas):
     resumen = []
     for col in columnas:
@@ -28,12 +35,10 @@ def comparar_productos(df_origen, df_destino, columnas):
         })
     return pd.DataFrame(resumen)
 
-# Función para aplicar color a las filas que cambian
 def resaltar_filas(row):
     color = 'background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else ''
     return [color] * len(row)
 
-# Función para descargar Excel
 def generar_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -41,78 +46,57 @@ def generar_excel(df):
     output.seek(0)
     return output
 
-# Procesamiento si se suben archivos
-if file_ddp and file_homologacion:
-    df_ddp = pd.read_excel(file_ddp)
-    df_mapa = pd.read_excel(file_homologacion)
+# Sección: Análisis de Secuencia de Cambios
+def analizar_secuencia(programa, mapa, ddp, tiempo):
+    st.subheader("🔀 Análisis de Secuencia de Cambios")
 
-    # Unir mapa de homologación
-    df_ddp = df_ddp.merge(df_mapa, left_on="Nombre STD", right_on="Producto STD", how="left")
+    # Homologar productos
+    programa = programa.merge(mapa, left_on="DESCRIPCIÓN", right_on="Producto Limpio", how="left")
+    programa = programa.sort_values(by="INICIO")
+    programa["Producto STD"] = programa["Producto STD"].fillna("Sin homologar")
 
-    st.subheader("🔍 Comparador de Productos")
+    cambios = []
+    for i in range(len(programa) - 1):
+        origen = programa.iloc[i]["Producto STD"]
+        destino = programa.iloc[i+1]["Producto STD"]
+        if origen == destino or "Sin homologar" in [origen, destino]:
+            continue
 
-    # Lista de productos únicos
-    productos_std = sorted(df_ddp["Producto STD"].dropna().unique())
+        # Buscar tiempo de cambio
+        match = tiempo[(tiempo["Producto Origen STD"] == origen) & (tiempo["Producto Destino STD"] == destino)]
+        minutos = match["Minutos de Cambio"].mean() if not match.empty else "Sin datos"
 
-    # Selectboxes
-    col1, col2 = st.columns(2)
-    with col1:
-        producto_origen = st.selectbox("Selecciona Producto Origen", productos_std, key="origen")
-    with col2:
-        producto_destino = st.selectbox("Selecciona Producto Destino", productos_std, key="destino")
+        # Comparar condiciones
+        df_origen = ddp[ddp["Nombre STD"] == origen]
+        df_destino = ddp[ddp["Nombre STD"] == destino]
+        cambios_tecnicos = 0
+        if not df_origen.empty and not df_destino.empty:
+            columnas_tecnicas = [col for col in df_origen.columns if col not in ["Producto STD", "Nombre STD"]]
+            diferencias = comparar_productos(df_origen, df_destino, columnas_tecnicas)
+            cambios_tecnicos = diferencias[diferencias["¿Cambia?"] == "✅ Sí"].shape[0]
 
-    # Filtrar productos seleccionados
-    datos_origen = df_ddp[df_ddp["Producto STD"] == producto_origen].drop(columns=["Producto Limpio"])
-    datos_destino = df_ddp[df_ddp["Producto STD"] == producto_destino].drop(columns=["Producto Limpio"])
+        cambios.append({
+            "Producto Origen": origen,
+            "Producto Destino": destino,
+            "Minutos Prom. Cambio": minutos,
+            "Variables que Cambian": cambios_tecnicos
+        })
 
-    if datos_origen.empty or datos_destino.empty:
-        st.warning("No se encontraron datos técnicos para uno de los productos seleccionados.")
-    else:
-        st.markdown("### 🧮 Detalle Técnico")
-        col3, col4 = st.columns(2)
-        with col3:
-            st.markdown(f"**Producto Origen: {producto_origen}**")
-            st.dataframe(datos_origen.reset_index(drop=True))
-        with col4:
-            st.markdown(f"**Producto Destino: {producto_destino}**")
-            st.dataframe(datos_destino.reset_index(drop=True))
+    df_cambios = pd.DataFrame(cambios)
+    st.dataframe(df_cambios)
 
-        st.markdown("### 📋 Resumen de Diferencias Técnicas")
-
-        columnas_tecnicas = [col for col in datos_origen.columns if col not in ["Producto STD", "Nombre STD"]]
-        resumen_diferencias = comparar_productos(datos_origen, datos_destino, columnas_tecnicas)
-
-        st.dataframe(resumen_diferencias.style.apply(resaltar_filas, axis=1))
-
-        # Botón para exportar a Excel
-        excel_export = generar_excel(resumen_diferencias)
+    # Exportar a Excel
+    if not df_cambios.empty:
         st.download_button(
-            label="📥 Descargar resumen en Excel",
-            data=excel_export,
-            file_name=f"Diferencias_{producto_origen}_vs_{producto_destino}.xlsx",
+            "📄 Descargar resumen de secuencia",
+            data=generar_excel(df_cambios),
+            file_name="Resumen_Cambios_Secuencia.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-# Mostrar tiempo histórico de cambio
-if file_tiempo and file_homologacion:
-    df_tiempo = pd.read_excel(file_tiempo)
-    df_mapa = pd.read_excel(file_homologacion)
-
-    # Homologar productos origen y destino
-    df_tiempo = df_tiempo.merge(df_mapa[['Producto Limpio', 'Producto STD']], left_on="Producto Origen", right_on="Producto Limpio", how="left")
-    df_tiempo.rename(columns={"Producto STD": "Origen STD"}, inplace=True)
-    df_tiempo = df_tiempo.merge(df_mapa[['Producto Limpio', 'Producto STD']], left_on="Producto Destino", right_on="Producto Limpio", how="left")
-    df_tiempo.rename(columns={"Producto STD": "Destino STD"}, inplace=True)
-
-    # Filtrar combinación seleccionada
-    filtro = (
-        (df_tiempo["Origen STD"] == producto_origen) &
-        (df_tiempo["Destino STD"] == producto_destino)
-    )
-
-    st.markdown("### ⏱️ Tiempo Histórico de Cambio")
-    if df_tiempo[filtro].empty:
-        st.info("No se encontraron datos de tiempo histórico para este cambio.")
-    else:
-        tiempo_prom = df_tiempo[filtro]["Minutos de Cambio"].mean()
-        st.success(f"Tiempo promedio histórico entre estos productos: **{round(tiempo_prom, 1)} minutos**")
+# Ejecutar si hay archivo cargado
+if file_programa:
+    df_programa = pd.read_excel(file_programa)
+    analizar_secuencia(df_programa, df_mapa, df_ddp, df_tiempo)
+else:
+    st.info("Por favor, sube el archivo Programa.xlsx para iniciar el análisis.")
