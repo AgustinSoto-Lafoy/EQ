@@ -8,15 +8,11 @@ st.title("🔧 Plataforma de Cambio de Producto – Laminador")
 @st.cache_data
 def cargar_datos_estaticos():
     ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
-    mapa = pd.read_excel("data/Mapa_Homologacion_Producto.xlsx")
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
-    return ddp, mapa, tiempo, desbaste
+    return ddp, tiempo, desbaste
 
-df_ddp, df_mapa, df_tiempo, df_desbaste = cargar_datos_estaticos()
-
-# Homologar productos: unir mapa con DDP por Nombre STD
-homologado_ddp = df_ddp.merge(df_mapa, left_on="Producto", right_on="Nombre STD", how="left")
+df_ddp, df_tiempo, df_desbaste = cargar_datos_estaticos()
 
 st.sidebar.header(":page_facing_up: Subida de Programa")
 file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["xlsx"])
@@ -31,7 +27,7 @@ def comparar_productos_por_posicion(dfA, dfB, columnas):
     ))
     for pos in posiciones:
         filaA = dfA[dfA["STD"] == pos]
-        filaB = dfB[df_B["STD"] == pos]
+        filaB = dfB[dfB["STD"] == pos]
         for col in columnas:
             valA = filaA[col].values[0] if not filaA.empty and col in filaA else None
             valB = filaB[col].values[0] if not filaB.empty and col in filaB else None
@@ -51,19 +47,19 @@ def comparar_productos_por_posicion(dfA, dfB, columnas):
     return pd.DataFrame(resumen)
 
 def resaltar_filas(row):
-    color = 'background-color: #ffcccc' if row["¿Cambia?" ]== "✅ Sí" else ''
+    color = 'background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else ''
     return [color] * len(row)
 
 st.subheader("🔄 Comparador Manual de Productos")
-familias = sorted(homologado_ddp["Familia"].dropna().unique())
+familias = sorted(df_ddp["Familia"].dropna().unique())
 colf1, colf2 = st.columns(2)
 with colf1:
     familiaA = st.selectbox("Selecciona Familia A", familias, key="famA")
 with colf2:
     familiaB = st.selectbox("Selecciona Familia B", familias, key="famB")
 
-df_famA = homologado_ddp[homologado_ddp["Familia"] == familiaA]
-df_famB = homologado_ddp[homologado_ddp["Familia"] == familiaB]
+df_famA = df_ddp[df_ddp["Familia"] == familiaA]
+df_famB = df_ddp[df_ddp["Familia"] == familiaB]
 
 productosA = sorted(df_famA["Producto"].dropna().unique())
 productosB = sorted(df_famB["Producto"].dropna().unique())
@@ -79,7 +75,7 @@ df_A = df_famA[df_famA["Producto"] == productoA]
 df_B = df_famB[df_famB["Producto"] == productoB]
 
 if not df_A.empty and not df_B.empty:
-    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia", "Nombre STD", "Producto STD"]]
+    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
     resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
 
     st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
@@ -103,13 +99,13 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-    # Usar "Producto" directamente para cruzar con tiempo
+    # Buscar tiempo directamente por nombre de producto
     st.write("🔍 Debug: Producto A:", productoA)
     st.write("🔍 Debug: Producto B:", productoB)
 
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen"].str.strip() == productoA) &
-        (df_tiempo["Producto Destino"].str.strip() == productoB)
+        (df_tiempo["Producto Origen STD"].str.strip() == productoA) &
+        (df_tiempo["Producto Destino STD"].str.strip() == productoB)
     ]["Minutos de Cambio"].values
 
     st.write("🔍 Debug: Resultado tiempo_exacto:", tiempo_exacto)
