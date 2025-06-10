@@ -31,7 +31,7 @@ def comparar_productos_por_posicion(dfA, dfB, columnas):
     ))
     for pos in posiciones:
         filaA = dfA[dfA["STD"] == pos]
-        filaB = dfB[dfB["STD"] == pos]
+        filaB = dfB[df_B["STD"] == pos]
         for col in columnas:
             valA = filaA[col].values[0] if not filaA.empty and col in filaA else None
             valB = filaB[col].values[0] if not filaB.empty and col in filaB else None
@@ -51,7 +51,7 @@ def comparar_productos_por_posicion(dfA, dfB, columnas):
     return pd.DataFrame(resumen)
 
 def resaltar_filas(row):
-    color = 'background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else ''
+    color = 'background-color: #ffcccc' if row["¿Cambia?" ]== "✅ Sí" else ''
     return [color] * len(row)
 
 st.subheader("🔄 Comparador Manual de Productos")
@@ -103,18 +103,15 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-    # Usar "Producto STD" para cruzar con tiempo
-    prod_std_A = df_A.iloc[0]["Producto STD"] if "Producto STD" in df_A.columns else None
-    prod_std_B = df_B.iloc[0]["Producto STD"] if "Producto STD" in df_B.columns else None
-
-    st.write("🔍 Debug: Producto STD A:", prod_std_A)
-    st.write("🔍 Debug: Producto STD B:", prod_std_B)
+    # Usar "Producto" directamente para cruzar con tiempo
+    st.write("🔍 Debug: Producto A:", productoA)
+    st.write("🔍 Debug: Producto B:", productoB)
 
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen STD"].str.strip() == prod_std_A) &
-        (df_tiempo["Producto Destino STD"].str.strip() == prod_std_B)
+        (df_tiempo["Producto Origen"].str.strip() == productoA) &
+        (df_tiempo["Producto Destino"].str.strip() == productoB)
     ]["Minutos de Cambio"].values
-    
+
     st.write("🔍 Debug: Resultado tiempo_exacto:", tiempo_exacto)
 
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
