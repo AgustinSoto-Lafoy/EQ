@@ -15,6 +15,9 @@ def cargar_datos_estaticos():
 
 df_ddp, df_mapa, df_tiempo, df_desbaste = cargar_datos_estaticos()
 
+# Homologar productos: unir mapa con DDP por Nombre STD
+homologado_ddp = df_ddp.merge(df_mapa, left_on="Producto", right_on="Nombre STD", how="left")
+
 st.sidebar.header(":page_facing_up: Subida de Programa")
 file_programa = st.sidebar.file_uploader("Subir archivo Programa.xlsx", type=["xlsx"])
 
@@ -52,15 +55,15 @@ def resaltar_filas(row):
     return [color] * len(row)
 
 st.subheader("🔄 Comparador Manual de Productos")
-familias = sorted(df_ddp["Familia"].dropna().unique())
+familias = sorted(homologado_ddp["Familia"].dropna().unique())
 colf1, colf2 = st.columns(2)
 with colf1:
     familiaA = st.selectbox("Selecciona Familia A", familias, key="famA")
 with colf2:
     familiaB = st.selectbox("Selecciona Familia B", familias, key="famB")
 
-df_famA = df_ddp[df_ddp["Familia"] == familiaA]
-df_famB = df_ddp[df_ddp["Familia"] == familiaB]
+df_famA = homologado_ddp[homologado_ddp["Familia"] == familiaA]
+df_famB = homologado_ddp[homologado_ddp["Familia"] == familiaB]
 
 productosA = sorted(df_famA["Producto"].dropna().unique())
 productosB = sorted(df_famB["Producto"].dropna().unique())
@@ -76,7 +79,7 @@ df_A = df_famA[df_famA["Producto"] == productoA]
 df_B = df_famB[df_famB["Producto"] == productoB]
 
 if not df_A.empty and not df_B.empty:
-    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
+    columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia", "Nombre STD", "Producto STD"]]
     resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
 
     st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
@@ -100,10 +103,13 @@ if not df_A.empty and not df_B.empty:
     st.markdown("### 🧠 Comparación Diagrama Desbaste (por Familia)")
     st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-    # Buscar tiempo de cambio por nombre de producto
+    # Usar "Producto STD" para cruzar con tiempo
+    prod_std_A = df_A.iloc[0]["Producto STD"] if "Producto STD" in df_A.columns else None
+    prod_std_B = df_B.iloc[0]["Producto STD"] if "Producto STD" in df_B.columns else None
+
     tiempo_exacto = df_tiempo[
-        (df_tiempo["Producto Origen"].str.strip() == productoA) &
-        (df_tiempo["Producto Destino"].str.strip() == productoB)
+        (df_tiempo["Producto Origen STD"].str.strip() == prod_std_A) &
+        (df_tiempo["Producto Destino STD"].str.strip() == prod_std_B)
     ]["Minutos de Cambio"].values
     tiempo_str = f"{tiempo_exacto[0]}" if len(tiempo_exacto) > 0 else "Sin datos"
     st.success(f"Tiempo estimado de cambio: {tiempo_str} minutos")
