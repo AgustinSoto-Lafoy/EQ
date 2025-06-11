@@ -4,7 +4,7 @@ from io import BytesIO
 
 st.set_page_config(page_title="Cambio de Producto", layout="wide")
 
-@st.cache_data
+@st.cache_data(ttl=0)
 def cargar_datos_estaticos():
     ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
