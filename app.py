@@ -12,6 +12,7 @@ def cargar_datos_estaticos():
 
     for col in ["Producto Origen STD", "Producto Destino STD"]:
         tiempo[col] = tiempo[col].astype(str).str.strip().str.upper()
+    tiempo["Minutos de Cambio"] = pd.to_numeric(tiempo["Minutos de Cambio"], errors="coerce")
     ddp["Producto"] = ddp["Producto"].astype(str).str.strip().str.upper()
 
     return ddp, tiempo, desbaste
