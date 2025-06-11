@@ -4,16 +4,29 @@ from io import BytesIO
 
 st.set_page_config(page_title="Cambio de Producto", layout="wide")
 
-@st.cache_data(ttl=0)
+@st.cache_data
 def cargar_datos_estaticos():
     ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
 
     for col in ["Producto Origen STD", "Producto Destino STD"]:
-        tiempo[col] = tiempo[col].astype(str).str.strip().str.upper()
+        tiempo[col] = (
+            tiempo[col]
+            .astype(str)
+            .str.upper()
+            .str.replace(r"\s+", " ", regex=True)  # reemplaza múltiples espacios internos
+            .str.strip()
+        )
     tiempo["Minutos de Cambio"] = pd.to_numeric(tiempo["Minutos de Cambio"], errors="coerce")
-    ddp["Producto"] = ddp["Producto"].astype(str).str.strip().str.upper()
+
+    ddp["Producto"] = (
+        ddp["Producto"]
+        .astype(str)
+        .str.upper()
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
 
     return ddp, tiempo, desbaste
 
