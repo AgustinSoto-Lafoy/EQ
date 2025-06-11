@@ -10,24 +10,6 @@ def cargar_datos_estaticos():
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
 
-    for col in ["Producto Origen STD", "Producto Destino STD"]:
-        tiempo[col] = (
-            tiempo[col]
-            .astype(str)
-            .str.upper()
-            .str.replace(r"\s+", " ", regex=True)  # reemplaza múltiples espacios internos
-            .str.strip()
-        )
-    tiempo["Minutos de Cambio"] = pd.to_numeric(tiempo["Minutos de Cambio"], errors="coerce")
-
-    ddp["Producto"] = (
-        ddp["Producto"]
-        .astype(str)
-        .str.upper()
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
-
     return ddp, tiempo, desbaste
 
 df_ddp, df_tiempo, df_desbaste = cargar_datos_estaticos()
@@ -110,7 +92,7 @@ with tabs[0]:
         columnas_ddp = [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]
         resumen_ddp = comparar_productos_por_posicion(df_A, df_B, columnas_ddp)
 
-        st.markdown("### 🔢 Diferencias Técnicas por Posición del Laminador (DDP)")
+        st.markdown("### 🔢 Diferencias Técnicas por cambio producto")
         if st.checkbox("Mostrar solo componentes que cambian (DDP)", value=False):
             resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
         st.dataframe(resumen_ddp.astype(str).style.apply(resaltar_filas, axis=1))
@@ -134,12 +116,12 @@ with tabs[0]:
                 "¿Cambia?": "✅ Sí" if cambia else "❌ No"
             })
         df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
-        st.markdown("### 🧠 Comparación Diagrama Desbaste (todas las posiciones)")
+        st.markdown("### 🧠 Diagrama Desbaste")
         if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
             df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
         st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar_filas, axis=1))
 
-        st.markdown("### 📊 Resumen de Cambios Técnicos")
+        st.markdown("### 📊 Resumen de cambios")
         resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
         conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
         conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
@@ -147,4 +129,4 @@ with tabs[0]:
 
 with tabs[1]:
     st.title("📋 Análisis de Secuencia de Programa")
-    st.info("Aquí podrás analizar los cambios de producto según el programa cargado. (En desarrollo)")
+    st.info("(En desarrollo)")
