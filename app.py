@@ -77,11 +77,9 @@ with tabs[0]:
 
     if not df_A.empty and not df_B.empty:
         # Mostrar tiempo de cambio si existe
-        prodA_norm = productoA.strip().upper()
-        prodB_norm = productoB.strip().upper()
         tiempo_exacto = df_tiempo[
-            (df_tiempo["Nombre STD Origen"] == prodA_norm) &
-            (df_tiempo["Nombre STD Destino"] == prodB_norm)
+            (df_tiempo["Nombre STD Origen"] == productoA) &
+            (df_tiempo["Nombre STD Destino"] == productoB) 
         ]["Minutos Cambio"].values
 
         if len(tiempo_exacto) > 0:
