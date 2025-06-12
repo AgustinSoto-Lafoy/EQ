@@ -80,9 +80,9 @@ with tabs[0]:
         prodA_norm = productoA.strip().upper()
         prodB_norm = productoB.strip().upper()
         tiempo_exacto = df_tiempo[
-            (df_tiempo["Producto Origen STD"] == prodA_norm) &
-            (df_tiempo["Producto Destino STD"] == prodB_norm)
-        ]["Minutos de Cambio"].values
+            (df_tiempo["Nombre STD Origen"] == prodA_norm) &
+            (df_tiempo["Nombre STD Destino"] == prodB_norm)
+        ]["Minutos Cambio"].values
 
         if len(tiempo_exacto) > 0:
             st.success(f"⏱️ Tiempo estimado de cambio: {tiempo_exacto[0]} minutos")
