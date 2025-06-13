@@ -124,7 +124,7 @@ with tabs[1]:
 
     if archivo is not None:
         try:
-            df_prog = pd.read_excel(archivo, sheet_name="Hoja1")
+            df_prog = pd.read_excel(archivo, sheet_name="TablaCombinada")
             df_prog = df_prog[["Nombre STD"]].dropna().reset_index(drop=True)
 
             resumen = []
