@@ -9,7 +9,6 @@ def cargar_datos_estaticos():
     ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
-
     return ddp, tiempo, desbaste
 
 df_ddp, df_tiempo, df_desbaste = cargar_datos_estaticos()
@@ -38,6 +37,17 @@ with tabs[0]:
         productoA = st.selectbox("Selecciona Producto A", productosA, key="A", index=0)
     with colB:
         productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
+
+    # Mostrar familia real si no se ha filtrado
+    if familiaA == "(Todos)" and productoA:
+        familia_real_A = df_ddp[df_ddp["Producto"] == productoA]["Familia"].values
+        if len(familia_real_A) > 0:
+            st.info(f"📌 Producto A pertenece a la familia: **{familia_real_A[0]}**")
+
+    if familiaB == "(Todos)" and productoB:
+        familia_real_B = df_ddp[df_ddp["Producto"] == productoB]["Familia"].values
+        if len(familia_real_B) > 0:
+            st.info(f"📌 Producto B pertenece a la familia: **{familia_real_B[0]}**")
 
     def comparar_productos_por_posicion(dfA, dfB, columnas):
         resumen = []
