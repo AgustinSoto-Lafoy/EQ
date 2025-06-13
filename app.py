@@ -142,7 +142,7 @@ with tabs[1]:
                     merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
                     cambios_codigo_canal = merged.apply(
                         lambda row: row["Código Canal_A"] != row["Código Canal_B"]
-                        if "Código Canal_A" in row and "Código Canal_B" in row else False, axis=1
+                        if "Codigo Canal_A" in row and "Codigo Canal_B" in row else False, axis=1
                     ).sum()
 
                     resumen.append({
@@ -155,7 +155,26 @@ with tabs[1]:
                     })
 
             df_resumen = pd.DataFrame(resumen)
-            st.dataframe(df_resumen)
+
+            st.markdown("### 🧮 Reordenador editable")
+            df_editado = st.data_editor(df_resumen, use_container_width=True, num_rows="fixed")
+
+            st.markdown("### 🔍 Comparador detallado por fila")
+            for idx, fila in df_editado.iterrows():
+                with st.expander(f"{fila['Secuencia']}: {fila['Producto Origen']} → {fila['Producto Destino']}"):
+                    st.write(f"🕒 Tiempo estimado: {fila['Tiempo estimado']} min")
+                    st.write(f"🔄 Cambios Código Canal: {fila['Cambios Código Canal']}")
+                    df_A_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Origen']]
+                    df_B_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Destino']]
+                    columnas_cmp = [col for col in df_A_cmp.columns if col not in ["STD", "Producto", "Familia"]]
+                    resumen_cmp = comparar_productos(df_A_cmp, df_B_cmp, columnas_cmp)
+                    resumen_cmp = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
+                    st.dataframe(resumen_cmp)
+
+            st.markdown("### 📋 Vista general")
+            st.dataframe(df_editado)
+
+            
 
         except Exception as e:
             st.error(f"❌ Error al procesar el archivo: {e}")
