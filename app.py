@@ -51,7 +51,7 @@ with tabs[0]:
         posiciones = sorted(set(dfA["STD"]).union(dfB["STD"]))
         for pos in posiciones:
             filaA = dfA[dfA["STD"] == pos]
-            filaB = dfB[dfB["STD"] == pos]
+            filaB = dfB[df_B["STD"] == pos]
             for col in columnas:
                 valA = filaA[col].values[0] if not filaA.empty else None
                 valB = filaB[col].values[0] if not filaB.empty else None
@@ -79,6 +79,36 @@ with tabs[0]:
         if st.checkbox("Mostrar solo componentes que cambian (DDP)", value=False):
             resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
         st.dataframe(resumen_ddp.style.apply(resaltar, axis=1))
+
+        resumen_desbaste = []
+        desbA = df_desbaste[df_desbaste["Familia"] == familiaA] if familiaA != "(Todos)" else df_desbaste
+        desbB = df_desbaste[df_desbaste["Familia"] == familiaB] if familiaB != "(Todos)" else df_desbaste
+
+        pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
+        for substd, comp in pares:
+            val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
+            val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
+            val1 = val1[0] if len(val1) > 0 else None
+            val2 = val2[0] if len(val2) > 0 else None
+            cambia = val1 != val2 and not (pd.isna(val1) and pd.isna(val2))
+            resumen_desbaste.append({
+                "Posición": substd,
+                "Componente": comp,
+                "Valor A": val1,
+                "Valor B": val2,
+                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
+            })
+        df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
+        st.markdown("### 🧠 Diagrama Desbaste")
+        if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
+            df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
+        st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar, axis=1))
+
+        st.markdown("### 📊 Resumen de cambios")
+        resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
+        conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
+        conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
+        st.dataframe(conteo_por_componente)
 
 with tabs[1]:
     st.title("📋 Secuencia de Programa")
