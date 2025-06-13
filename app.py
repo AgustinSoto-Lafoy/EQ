@@ -157,7 +157,12 @@ with tabs[1]:
             df_resumen = pd.DataFrame(resumen)
 
             st.markdown("### 🧮 Reordenador editable")
-            df_editado = st.data_editor(df_resumen, use_container_width=True, num_rows="fixed")
+            df_editado = st.data_editor(
+                df_resumen.assign(Orden=df_resumen.index + 1),
+                use_container_width=True,
+                num_rows="fixed"
+            )
+            df_editado = df_editado.sort_values("Orden").reset_index(drop=True)
 
             st.markdown("### 🔍 Comparador detallado por fila")
             for idx, fila in df_editado.iterrows():
