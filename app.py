@@ -100,7 +100,7 @@ with tabs[0]:
             else:
                 cambia = val1 != val2
             if (val1 is not None and not pd.isna(val1)) or (val2 is not None and not pd.isna(val2)):
-            resumen_desbaste.append({
+                resumen_desbaste.append({
                 "Posición": substd,
                 "Componente": comp,
                 "Valor A": val1,
