@@ -4,15 +4,13 @@ import pandas as pd
 st.set_page_config(page_title="Cambio de Producto", layout="wide")
 
 @st.cache_data
-
 def cargar_datos():
     ddp = pd.read_excel("data/Consolidado_Laminador.xlsx")
     tiempo = pd.read_excel("data/BBDD_Tiempo.xlsx")
     desbaste = pd.read_excel("data/Diagrama_Desbaste.xlsx")
-    programa = pd.read_excel("data/Acop_Programa.xlsx", sheet_name="Hoja1")
-    return ddp, tiempo, desbaste, programa
+    return ddp, tiempo, desbaste
 
-df_ddp, df_tiempo, df_desbaste, df_programa = cargar_datos()
+df_ddp, df_tiempo, df_desbaste = cargar_datos()
 
 tabs = st.tabs(["🆚 Comparador de Productos", "📋 Secuencia de Programa"])
 
@@ -85,33 +83,41 @@ with tabs[0]:
 with tabs[1]:
     st.title("📋 Secuencia de Programa")
 
-    df_programa = df_programa[["Nombre STD"]].dropna().reset_index(drop=True)
+    archivo = st.file_uploader("📤 Sube el archivo de programa (xlsx)", type=["xlsx"])
 
-    resumen = []
-    for i in range(len(df_programa) - 1):
-        origen = df_programa.loc[i, "Nombre STD"]
-        destino = df_programa.loc[i + 1, "Nombre STD"]
+    if archivo is not None:
+        try:
+            df_prog = pd.read_excel(archivo, sheet_name="Hoja1")
+            df_prog = df_prog[["Nombre STD"]].dropna().reset_index(drop=True)
 
-        t = df_tiempo[(df_tiempo["Nombre STD Origen"] == origen) & (df_tiempo["Nombre STD Destino"] == destino)]["Minutos Cambio"].values
-        tiempo = t[0] if len(t) > 0 else None
+            resumen = []
+            for i in range(len(df_prog) - 1):
+                origen = df_prog.loc[i, "Nombre STD"]
+                destino = df_prog.loc[i + 1, "Nombre STD"]
 
-        df_A = df_ddp[df_ddp["Producto"] == origen]
-        df_B = df_ddp[df_ddp["Producto"] == destino]
-        cambios_ddp = 0
-        if not df_A.empty and not df_B.empty:
-            for col in [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]:
-                valA = df_A[col].values[0] if col in df_A else None
-                valB = df_B[col].values[0] if col in df_B else None
-                if valA != valB:
-                    cambios_ddp += 1
+                t = df_tiempo[(df_tiempo["Nombre STD Origen"] == origen) & (df_tiempo["Nombre STD Destino"] == destino)]["Minutos Cambio"].values
+                tiempo = t[0] if len(t) > 0 else None
 
-        resumen.append({
-            "Secuencia": i + 1,
-            "Producto Origen": origen,
-            "Producto Destino": destino,
-            "Tiempo estimado (min)": tiempo,
-            "Componentes que cambian": cambios_ddp
-        })
+                df_A = df_ddp[df_ddp["Producto"] == origen]
+                df_B = df_ddp[df_ddp["Producto"] == destino]
+                cambios_ddp = 0
+                if not df_A.empty and not df_B.empty:
+                    for col in [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]:
+                        valA = df_A[col].values[0] if col in df_A else None
+                        valB = df_B[col].values[0] if col in df_B else None
+                        if valA != valB:
+                            cambios_ddp += 1
 
-    df_resumen = pd.DataFrame(resumen)
-    st.dataframe(df_resumen)
+                resumen.append({
+                    "Secuencia": i + 1,
+                    "Producto Origen": origen,
+                    "Producto Destino": destino,
+                    "Tiempo estimado (min)": tiempo,
+                    "Componentes que cambian": cambios_ddp
+                })
+
+            df_resumen = pd.DataFrame(resumen)
+            st.dataframe(df_resumen)
+
+        except Exception as e:
+            st.error(f"❌ Error al procesar el archivo: {e}")
