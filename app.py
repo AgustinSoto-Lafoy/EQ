@@ -14,6 +14,7 @@ df_ddp, df_tiempo, df_desbaste = cargar_datos()
 
 tabs = st.tabs(["🆚 Comparador de Productos", "📋 Secuencia de Programa"])
 
+# --- PESTAÑA COMPARADOR MANUAL ---
 with tabs[0]:
     st.title("🔧 Plataforma de Cambio de Producto – Laminador")
     st.subheader("🔄 Comparador Manual de Productos")
@@ -51,20 +52,18 @@ with tabs[0]:
         posiciones = sorted(set(dfA["STD"]).union(dfB["STD"]))
         for pos in posiciones:
             filaA = dfA[dfA["STD"] == pos]
-            filaB = dfB[df_B["STD"] == pos]
+            filaB = dfB[dfB["STD"] == pos]
             for col in columnas:
                 valA = filaA[col].values[0] if not filaA.empty else None
                 valB = filaB[col].values[0] if not filaB.empty else None
                 if (valA is None or pd.isna(valA)) and (valB is None or pd.isna(valB)):
-                    cambia = False
-                else:
-                    cambia = valA != valB
-                if (valA is not None and not pd.isna(valA)) or (valB is not None and not pd.isna(valB)):
-                    resumen.append({"Posicion": pos, "Componente": col, "Valor A": valA, "Valor B": valB, "¿Cambia?": "✅ Sí" if cambia else "❌ No"})
+                    continue
+                cambia = valA != valB
+                resumen.append({"Posicion": pos, "Componente": col, "Valor A": valA, "Valor B": valB, "¿Cambia?": "✅ Sí" if cambia else "❌ No"})
         return pd.DataFrame(resumen)
 
     def resaltar(row):
-        base_color = "#ffacac" if st.get_option("theme.base") == "Light" else "#FF4545"
+        base_color = "#ffacac" if st.get_option("theme.base") == "Light" else "#FF6E6E"
         return [f'background-color: {base_color}' if row["¿Cambia?"] == "✅ Sí" else '' for _ in row]
 
     df_A = df_famA[df_famA["Producto"] == productoA]
@@ -96,11 +95,9 @@ with tabs[0]:
             val1 = val1[0] if len(val1) > 0 else None
             val2 = val2[0] if len(val2) > 0 else None
             if (val1 is None or pd.isna(val1)) and (val2 is None or pd.isna(val2)):
-                cambia = False
-            else:
-                cambia = val1 != val2
-            if (val1 is not None and not pd.isna(val1)) or (val2 is not None and not pd.isna(val2)):
-                resumen_desbaste.append({
+                continue
+            cambia = val1 != val2
+            resumen_desbaste.append({
                 "Posición": substd,
                 "Componente": comp,
                 "Valor A": val1,
@@ -119,6 +116,7 @@ with tabs[0]:
         conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
         st.dataframe(conteo_por_componente)
 
+# --- PESTAÑA SECUENCIA DE PROGRAMA ---
 with tabs[1]:
     st.title("📋 Secuencia de Programa")
 
@@ -139,31 +137,22 @@ with tabs[1]:
 
                 df_A = df_ddp[df_ddp["Producto"] == origen]
                 df_B = df_ddp[df_ddp["Producto"] == destino]
-                cambios_ddp = 0
-                if not df_A.empty and not df_B.empty:
-                    for col in [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]:
-                        valA = df_A[col].values[0] if col in df_A else None
-                        valB = df_B[col].values[0] if col in df_B else None
-                        if valA is None and valB is None:
-                            continue
-                        if valA != valB:
-                            cambios_ddp += 1
 
                 if not df_A.empty and not df_B.empty:
                     merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
-                cambios_codigo_canal = merged.apply(
-                    lambda row: row["Codigo Canal_A"] != row["Codigo Canal_B"]
-                    if "Codigo Canal_A" in row and "Codigo Canal_B" in row else False, axis=1
-                ).sum()
+                    cambios_codigo_canal = merged.apply(
+                        lambda row: row["Codigo Canal_A"] != row["Codigo Canal_B"]
+                        if "Codigo Canal_A" in row and "Codigo Canal_B" in row else False, axis=1
+                    ).sum()
 
-                resumen.append({
-                    "Secuencia": i + 1,
-                    "Familia": f"{df_A['Familia'].values[0] if 'Familia' in df_A.columns else ''}" + "-" + f"{df_B['Familia'].values[0] if 'Familia' in df_B.columns else ''}",
-                    "Producto Origen": origen,
-                    "Producto Destino": destino,
-                    "Tiempo estimado": tiempo,
-                    "Cambios Código Canal": cambios_codigo_canal
-                })
+                    resumen.append({
+                        "Secuencia": i + 1,
+                        "Familia": f"{df_A['Familia'].values[0] if 'Familia' in df_A.columns else ''}" + "-" + f"{df_B['Familia'].values[0] if 'Familia' in df_B.columns else ''}",
+                        "Producto Origen": origen,
+                        "Producto Destino": destino,
+                        "Tiempo estimado": tiempo,
+                        "Cambios Código Canal": cambios_codigo_canal
+                    })
 
             df_resumen = pd.DataFrame(resumen)
             st.dataframe(df_resumen)
