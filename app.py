@@ -37,14 +37,14 @@ with tabs[0]:
         if familiaA == "(Todos)" and productoA:
             familia_real_A = df_ddp[df_ddp["Producto"] == productoA]["Familia"].dropna().unique()
             if len(familia_real_A) > 0:
-                st.markdown(f"<span style='font-size: 14px;'>Producto A pertenece a la familia: <b>{familia_real_A[0]}</b></span>", unsafe_allow_html=True)
+                st.markdown(f"🔖 <span style='font-size: 14px;'>Producto A pertenece a la familia: <b>{familia_real_A[0]}</b></span>", unsafe_allow_html=True)
 
     with colB:
         productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
         if familiaB == "(Todos)" and productoB:
             familia_real_B = df_ddp[df_ddp["Producto"] == productoB]["Familia"].dropna().unique()
             if len(familia_real_B) > 0:
-                st.markdown(f"<span style='font-size: 14px;'>Producto B pertenece a la familia: <b>{familia_real_B[0]}</b></span>", unsafe_allow_html=True)
+                st.markdown(f"🔖 <span style='font-size: 14px;'>Producto B pertenece a la familia: <b>{familia_real_B[0]}</b></span>", unsafe_allow_html=True)
 
     def comparar_productos(dfA, dfB, columnas):
         resumen = []
@@ -55,7 +55,7 @@ with tabs[0]:
             for col in columnas:
                 valA = filaA[col].values[0] if not filaA.empty else None
                 valB = filaB[col].values[0] if not filaB.empty else None
-                if valA is None and valB is None:
+                if (valA is None or pd.isna(valA)) and (valB is None or pd.isna(valB)):
                     cambia = False
                 else:
                     cambia = valA != valB
@@ -93,7 +93,10 @@ with tabs[0]:
             val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
             val1 = val1[0] if len(val1) > 0 else None
             val2 = val2[0] if len(val2) > 0 else None
-            cambia = val1 != val2 and not (pd.isna(val1) and pd.isna(val2))
+            if (val1 is None or pd.isna(val1)) and (val2 is None or pd.isna(val2)):
+                cambia = False
+            else:
+                cambia = val1 != val2
             resumen_desbaste.append({
                 "Posición": substd,
                 "Componente": comp,
