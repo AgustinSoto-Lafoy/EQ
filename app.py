@@ -37,14 +37,14 @@ with tabs[0]:
         if familiaA == "(Todos)" and productoA:
             familia_real_A = df_ddp[df_ddp["Producto"] == productoA]["Familia"].dropna().unique()
             if len(familia_real_A) > 0:
-                st.markdown(f"🔖 <span style='font-size: 14px;'>Producto A pertenece a la familia: <b>{familia_real_A[0]}</b></span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size: 14px;'>Producto A pertenece a la familia: <b>{familia_real_A[0]}</b></span>", unsafe_allow_html=True)
 
     with colB:
         productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
         if familiaB == "(Todos)" and productoB:
             familia_real_B = df_ddp[df_ddp["Producto"] == productoB]["Familia"].dropna().unique()
             if len(familia_real_B) > 0:
-                st.markdown(f"🔖 <span style='font-size: 14px;'>Producto B pertenece a la familia: <b>{familia_real_B[0]}</b></span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size: 14px;'>Producto B pertenece a la familia: <b>{familia_real_B[0]}</b></span>", unsafe_allow_html=True)
 
     def comparar_productos(dfA, dfB, columnas):
         resumen = []
@@ -59,11 +59,13 @@ with tabs[0]:
                     cambia = False
                 else:
                     cambia = valA != valB
-                resumen.append({"Posicion": pos, "Componente": col, "Valor A": valA, "Valor B": valB, "¿Cambia?": "✅ Sí" if cambia else "❌ No"})
+                if (valA is not None and not pd.isna(valA)) or (valB is not None and not pd.isna(valB)):
+                    resumen.append({"Posicion": pos, "Componente": col, "Valor A": valA, "Valor B": valB, "¿Cambia?": "✅ Sí" if cambia else "❌ No"})
         return pd.DataFrame(resumen)
 
     def resaltar(row):
-        return ['background-color: #ffcccc' if row["¿Cambia?"] == "✅ Sí" else '' for _ in row]
+        base_color = '#ff4d4d' if st.get_option("theme.base") == "light" else '#660000'
+        return [f'background-color: {base_color}' if row["¿Cambia?"] == "✅ Sí" else '' for _ in row]
 
     df_A = df_famA[df_famA["Producto"] == productoA]
     df_B = df_famB[df_famB["Producto"] == productoB]
@@ -97,6 +99,7 @@ with tabs[0]:
                 cambia = False
             else:
                 cambia = val1 != val2
+            if (val1 is not None and not pd.isna(val1)) or (val2 is not None and not pd.isna(val2)):
             resumen_desbaste.append({
                 "Posición": substd,
                 "Componente": comp,
