@@ -37,14 +37,14 @@ with tabs[0]:
         if familiaA == "(Todos)" and productoA:
             familia_real_A = df_ddp[df_ddp["Producto"] == productoA]["Familia"].dropna().unique()
             if len(familia_real_A) > 0:
-                st.markdown(f"🔖 <span style='font-size: 14px;'>Producto A pertenece a la familia: <b>{familia_real_A[0]}</b></span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size: 14px;'>Producto A pertenece a la familia: <b>{familia_real_A[0]}</b></span>", unsafe_allow_html=True)
 
     with colB:
         productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
         if familiaB == "(Todos)" and productoB:
             familia_real_B = df_ddp[df_ddp["Producto"] == productoB]["Familia"].dropna().unique()
             if len(familia_real_B) > 0:
-                st.markdown(f"🔖 <span style='font-size: 14px;'>Producto B pertenece a la familia: <b>{familia_real_B[0]}</b></span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size: 14px;'>Producto B pertenece a la familia: <b>{familia_real_B[0]}</b></span>", unsafe_allow_html=True)
 
     def comparar_productos(dfA, dfB, columnas):
         resumen = []
@@ -55,7 +55,10 @@ with tabs[0]:
             for col in columnas:
                 valA = filaA[col].values[0] if not filaA.empty else None
                 valB = filaB[col].values[0] if not filaB.empty else None
-                cambia = valA != valB
+                if valA is None and valB is None:
+                    cambia = False
+                else:
+                    cambia = valA != valB
                 resumen.append({"Posicion": pos, "Componente": col, "Valor A": valA, "Valor B": valB, "¿Cambia?": "✅ Sí" if cambia else "❌ No"})
         return pd.DataFrame(resumen)
 
@@ -135,6 +138,8 @@ with tabs[1]:
                     for col in [col for col in df_A.columns if col not in ["STD", "Producto", "Familia"]]:
                         valA = df_A[col].values[0] if col in df_A else None
                         valB = df_B[col].values[0] if col in df_B else None
+                        if valA is None and valB is None:
+                            continue
                         if valA != valB:
                             cambios_ddp += 1
 
@@ -143,7 +148,8 @@ with tabs[1]:
                     "Producto Origen": origen,
                     "Producto Destino": destino,
                     "Tiempo estimado (min)": tiempo,
-                    "Componentes que cambian": cambios_ddp
+                    "Código Canal Origen": df_A['Codigo Canal'].values[0] if 'Codigo Canal' in df_A.columns else None,
+                    "Código Canal Destino": df_B['Codigo Canal'].values[0] if 'Codigo Canal' in df_B.columns else None
                 })
 
             df_resumen = pd.DataFrame(resumen)
