@@ -141,7 +141,7 @@ with tabs[1]:
                 if not df_A.empty and not df_B.empty:
                     merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
                     cambios_codigo_canal = merged.apply(
-                        lambda row: row["Codigo Canal_A"] != row["Codigo Canal_B"]
+                        lambda row: row["Código Canal_A"] != row["Código Canal_B"]
                         if "Codigo Canal_A" in row and "Codigo Canal_B" in row else False, axis=1
                     ).sum()
 
