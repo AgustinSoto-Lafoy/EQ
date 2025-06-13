@@ -39,15 +39,21 @@ with tabs[0]:
         productoB = st.selectbox("Selecciona Producto B", productosB, key="B", index=0)
 
     # Mostrar familia real si no se ha filtrado
-    if familiaA == "(Todos)" and productoA:
-        familia_real_A = df_ddp[df_ddp["Producto"] == productoA]["Familia"].values
-        if len(familia_real_A) > 0:
-            st.info(f"📌 Producto A pertenece a la familia: **{familia_real_A[0]}**")
+    try:
+        if familiaA == "(Todos)" and productoA:
+            familia_real_A = df_ddp[df_ddp["Producto"] == productoA]["Familia"].dropna().unique()
+            if len(familia_real_A) > 0:
+                st.markdown(f"📌 **Producto A pertenece a la familia:** `{familia_real_A[0]}`")
+    except Exception as e:
+        st.warning(f"No se pudo identificar familia del Producto A: {e}")
 
-    if familiaB == "(Todos)" and productoB:
-        familia_real_B = df_ddp[df_ddp["Producto"] == productoB]["Familia"].values
-        if len(familia_real_B) > 0:
-            st.info(f"📌 Producto B pertenece a la familia: **{familia_real_B[0]}**")
+    try:
+        if familiaB == "(Todos)" and productoB:
+            familia_real_B = df_ddp[df_ddp["Producto"] == productoB]["Familia"].dropna().unique()
+            if len(familia_real_B) > 0:
+                st.markdown(f"📌 **Producto B pertenece a la familia:** `{familia_real_B[0]}`")
+    except Exception as e:
+        st.warning(f"No se pudo identificar familia del Producto B: {e}")
 
     def comparar_productos_por_posicion(dfA, dfB, columnas):
         resumen = []
@@ -86,10 +92,9 @@ with tabs[0]:
     df_B = df_famB[df_famB["Producto"] == productoB]
 
     if not df_A.empty and not df_B.empty:
-        # Mostrar tiempo de cambio si existe
         tiempo_exacto = df_tiempo[
             (df_tiempo["Nombre STD Origen"] == productoA) &
-            (df_tiempo["Nombre STD Destino"] == productoB) 
+            (df_tiempo["Nombre STD Destino"] == productoB)
         ]["Minutos Cambio"].values
 
         if len(tiempo_exacto) > 0:
