@@ -142,7 +142,7 @@ with tabs[1]:
                     merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
                     cambios_codigo_canal = merged.apply(
                         lambda row: row["Código Canal_A"] != row["Código Canal_B"]
-                        if "Codigo Canal_A" in row and "Codigo Canal_B" in row else False, axis=1
+                        if "Código Canal_A" in row and "Código Canal_B" in row else False, axis=1
                     ).sum()
 
                     resumen.append({
