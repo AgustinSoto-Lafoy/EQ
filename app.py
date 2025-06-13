@@ -64,7 +64,7 @@ with tabs[0]:
         return pd.DataFrame(resumen)
 
     def resaltar(row):
-        base_color = "#fababa" if st.get_option("theme.base") == "Light" else "#D85858"
+        base_color = "#ffacac" if st.get_option("theme.base") == "Light" else "#FF4545"
         return [f'background-color: {base_color}' if row["¿Cambia?"] == "✅ Sí" else '' for _ in row]
 
     df_A = df_famA[df_famA["Producto"] == productoA]
@@ -149,18 +149,21 @@ with tabs[1]:
                         if valA != valB:
                             cambios_ddp += 1
 
+                if not df_A.empty and not df_B.empty:
+                    merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
+                cambios_codigo_canal = merged.apply(
+                    lambda row: row["Codigo Canal_A"] != row["Codigo Canal_B"]
+                    if "Codigo Canal_A" in row and "Codigo Canal_B" in row else False, axis=1
+                ).sum()
+
                 resumen.append({
-                "Secuencia": i + 1,
-                "Familia": f"{df_A['Familia'].values[0] if 'Familia' in df_A.columns else ''}" + "-" + f"{df_B['Familia'].values[0] if 'Familia' in df_B.columns else ''}",
-                "Producto Origen": origen,
-                "Producto Destino": destino,
-                "Tiempo estimado": tiempo,
-                "Cambios Código Canal": (
-                    df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
-                    .apply(lambda row: row["Codigo Canal_A"] != row["Codigo Canal_B"], axis=1)
-                    .sum()
-                ) if 'Codigo Canal' in df_A.columns and 'Codigo Canal' in df_B.columns else None
-            })
+                    "Secuencia": i + 1,
+                    "Familia": f"{df_A['Familia'].values[0] if 'Familia' in df_A.columns else ''}" + "-" + f"{df_B['Familia'].values[0] if 'Familia' in df_B.columns else ''}",
+                    "Producto Origen": origen,
+                    "Producto Destino": destino,
+                    "Tiempo estimado": tiempo,
+                    "Cambios Código Canal": cambios_codigo_canal
+                })
 
             df_resumen = pd.DataFrame(resumen)
             st.dataframe(df_resumen)
