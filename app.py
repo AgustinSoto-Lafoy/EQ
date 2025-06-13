@@ -64,7 +64,7 @@ with tabs[0]:
         return pd.DataFrame(resumen)
 
     def resaltar(row):
-        base_color = '#ffcccc' if st.get_option("theme.base") == "light" else '#331111'
+        base_color = "#f7b8b8" if st.get_option("theme.base") == "light" else "#B33A3A"
         return [f'background-color: {base_color}' if row["¿Cambia?"] == "✅ Sí" else '' for _ in row]
 
     df_A = df_famA[df_famA["Producto"] == productoA]
