@@ -156,16 +156,10 @@ with tabs[1]:
 
             df_resumen = pd.DataFrame(resumen)
 
-            st.markdown("### 🧮 Reordenador editable")
-            df_editado = st.data_editor(
-                df_resumen.assign(Orden=df_resumen.index + 1),
-                use_container_width=True,
-                num_rows="fixed"
-            )
-            df_editado = df_editado.sort_values("Orden").reset_index(drop=True)
+            st.dataframe(df_resumen)
 
             st.markdown("### 🔍 Comparador detallado por fila")
-            for idx, fila in df_editado.iterrows():
+            for idx, fila in df_resumen.iterrows():
                 with st.expander(f"{fila['Secuencia']}: {fila['Producto Origen']} → {fila['Producto Destino']}"):
                     st.write(f"🕒 Tiempo estimado: {fila['Tiempo estimado']} min")
                     st.write(f"🔄 Cambios Código Canal: {fila['Cambios Código Canal']}")
@@ -174,12 +168,7 @@ with tabs[1]:
                     columnas_cmp = [col for col in df_A_cmp.columns if col not in ["STD", "Producto", "Familia"]]
                     resumen_cmp = comparar_productos(df_A_cmp, df_B_cmp, columnas_cmp)
                     resumen_cmp = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
-                    st.dataframe(resumen_cmp)
-
-            st.markdown("### 📋 Vista general")
-            st.dataframe(df_editado)
-
-            
+                    st.dataframe(resumen_cmp)          
 
         except Exception as e:
             st.error(f"❌ Error al procesar el archivo: {e}")
