@@ -64,7 +64,7 @@ with tabs[0]:
         return pd.DataFrame(resumen)
 
     def resaltar(row):
-        base_color = '#ff4d4d' if st.get_option("theme.base") == "light" else '#660000'
+        base_color = '#ffcccc' if st.get_option("theme.base") == "light" else '#331111'
         return [f'background-color: {base_color}' if row["¿Cambia?"] == "✅ Sí" else '' for _ in row]
 
     df_A = df_famA[df_famA["Producto"] == productoA]
@@ -155,7 +155,12 @@ with tabs[1]:
                     "Producto Destino": destino,
                     "Tiempo estimado (min)": tiempo,
                     "Código Canal Origen": df_A['Codigo Canal'].values[0] if 'Codigo Canal' in df_A.columns else None,
-                    "Código Canal Destino": df_B['Codigo Canal'].values[0] if 'Codigo Canal' in df_B.columns else None
+                    "Código Canal Destino": df_B['Codigo Canal'].values[0] if 'Codigo Canal' in df_B.columns else None,
+                    "Cantidad de Cambios en Código Canal": sum(
+                        (df_A['STD'].values == std and df_B['STD'].values == std and 
+                         df_A['Codigo Canal'].values[0] != df_B['Codigo Canal'].values[0])
+                        for std in df_A['STD'].unique()
+                    ) if 'Codigo Canal' in df_A.columns and 'Codigo Canal' in df_B.columns else None,
                 })
 
             df_resumen = pd.DataFrame(resumen)
