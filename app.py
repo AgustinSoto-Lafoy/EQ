@@ -163,7 +163,7 @@ with tabs[1]:
 
                     resumen.append({
                         "Secuencia": i + 1,
-                        "Familia": f"{df_A['Familia'].values[0] if 'Familia' in df_A.columns else ''}" + "-" + f"{df_B['Familia'].values[0] if 'Familia' in df_B.columns else ''}",
+                        "Familia": f"{df_A['Familia'].values[0]}" + "-" + f"{df_B['Familia'].values[0]}",
                         "Producto Origen": origen,
                         "Producto Destino": destino,
                         "Tiempo estimado": tiempo,
@@ -171,13 +171,11 @@ with tabs[1]:
                     })
 
             df_resumen = agrupar_cambios_consecutivos(pd.DataFrame(resumen))
-            st.dataframe(df_resumen)
 
-            st.markdown("### 🔍 Comparador detallado por fila")
+            st.markdown("### 🧩 Cambios en secuencia (con comparador técnico)")
             for idx, fila in df_resumen.iterrows():
-                with st.expander(f"{fila['Secuencia']}: {fila['Producto Origen']} → {fila['Producto Destino']}"):
-                    st.write(f"🕒 Tiempo estimado: {fila['Tiempo estimado']} min")
-                    st.write(f"🔄 Cambios Código Canal: {fila['Cambios Código Canal']}")
+                titulo = f"🔹 #{fila['Secuencia']} | {fila['Producto Origen']} → {fila['Producto Destino']} | ⏱️ {fila['Tiempo estimado']} min | 🔧 {fila['Cambios Código Canal']} cambios canal"
+                with st.expander(titulo):
                     df_A_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Origen']]
                     df_B_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Destino']]
                     columnas_cmp = [col for col in df_A_cmp.columns if col not in ["STD", "Producto", "Familia"]]
