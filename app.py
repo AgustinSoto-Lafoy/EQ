@@ -117,6 +117,22 @@ with tabs[0]:
         st.dataframe(conteo_por_componente)
 
 # --- PESTAÑA SECUENCIA DE PROGRAMA ---
+
+def agrupar_cambios_consecutivos(df):
+    df["Grupo"] = (df[["Producto Origen", "Producto Destino", "Tiempo estimado", "Cambios Código Canal"]]
+                   .ne(df[["Producto Origen", "Producto Destino", "Tiempo estimado", "Cambios Código Canal"]].shift())
+                   .any(axis=1)
+                   .cumsum())
+    df_agrupado = df.groupby("Grupo").agg({
+        "Secuencia": "first",
+        "Familia": "first",
+        "Producto Origen": "first",
+        "Producto Destino": "last",
+        "Tiempo estimado": "first",
+        "Cambios Código Canal": "first"
+    }).reset_index(drop=True)
+    return df_agrupado
+
 with tabs[1]:
     st.title("📋 Secuencia de Programa")
 
@@ -154,8 +170,7 @@ with tabs[1]:
                         "Cambios Código Canal": cambios_codigo_canal
                     })
 
-            df_resumen = pd.DataFrame(resumen)
-
+            df_resumen = agrupar_cambios_consecutivos(pd.DataFrame(resumen))
             st.dataframe(df_resumen)
 
             st.markdown("### 🔍 Comparador detallado por fila")
@@ -168,7 +183,7 @@ with tabs[1]:
                     columnas_cmp = [col for col in df_A_cmp.columns if col not in ["STD", "Producto", "Familia"]]
                     resumen_cmp = comparar_productos(df_A_cmp, df_B_cmp, columnas_cmp)
                     resumen_cmp = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
-                    st.dataframe(resumen_cmp)          
+                    st.dataframe(resumen_cmp)
 
         except Exception as e:
             st.error(f"❌ Error al procesar el archivo: {e}")
