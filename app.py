@@ -172,9 +172,12 @@ with tabs[1]:
 
             df_resumen = agrupar_cambios_consecutivos(pd.DataFrame(resumen))
 
-            st.markdown("### 🧩 Cambios en secuencia (con comparador técnico)")
+            st.markdown("### Cambios en secuencia")
             for idx, fila in df_resumen.iterrows():
-                titulo = f"🔹 #{fila['Secuencia']} | {fila['Producto Origen']} → {fila['Producto Destino']} | ⏱️ {fila['Tiempo estimado']} min | 🔧 {fila['Cambios Código Canal']} cambios canal"
+                tiempo_mostrar = "-" if pd.isna(fila['Tiempo estimado']) else f"{int(fila['Tiempo estimado'])} min"
+                titulo = f"🔹 #{fila['Secuencia']} | {fila['Producto Origen']} → {fila['Producto Destino']} | ⏱️ {tiempo_mostrar} | 🔧 {fila['Cambios Código Canal']} cambios cilindro"
+
+                
                 with st.expander(titulo):
                     df_A_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Origen']]
                     df_B_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Destino']]
