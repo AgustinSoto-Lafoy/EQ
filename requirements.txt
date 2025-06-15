@@ -3,10 +3,5 @@ pandas
 openpyxl
 xlsxwriter
 fpdf
-plotly.express
-plotly.graph_objects
-plotly.subplots
-io
-time
-datetime
+plotly
 numpy
