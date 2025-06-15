@@ -1334,6 +1334,21 @@ def mostrar_reportes_personalizados(df_ddp):
             )
 
 
+
+# =====================================
+# FUNCIÓN FALTANTE: obtener_tiempo_cambio
+# =====================================
+
+def obtener_tiempo_cambio(df_tiempo, producto_origen, producto_destino):
+    """Obtiene el tiempo de cambio entre dos productos."""
+    tiempo_exacto = df_tiempo[
+        (df_tiempo["Nombre STD Origen"] == producto_origen) & 
+        (df_tiempo["Nombre STD Destino"] == producto_destino)
+    ]["Minutos Cambio"].values
+
+    return tiempo_exacto[0] if len(tiempo_exacto) > 0 else None
+
+
 # =====================================
 # LLAMADA PRINCIPAL SEGURA
 # =====================================
