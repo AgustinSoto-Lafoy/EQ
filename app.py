@@ -91,22 +91,10 @@ def load_custom_css():
     }
     
     /* Animaciones */
-    .fade-in {
-        animation: fadeIn 0.5s ease-in;
+    to { opacity: 1; transform: translateY(0); }
     }
     
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .pulse {
-        animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-        0% { opacity: 1; }
-        50% { opacity: 0.7; }
+    50% { opacity: 0.7; }
         100% { opacity: 1; }
     }
     </style>
@@ -185,7 +173,7 @@ def cargar_programa_usuario():
                     
             except Exception as e:
                 st.error(f"❌ Error al cargar archivo: {e}")
-                st.info("💡 Asegúrate de que el archivo tenga la hoja 'TablaCombinada' y la columna 'Nombre STD'")
+                st.info("💡 Asegúrate de que el archivo tenga la hoja 'TablaCombinada' y la columna 'Producto'")
 
 # =====================================
 # FUNCIONES DE ANÁLISIS MEJORADAS
@@ -311,8 +299,8 @@ def crear_timeline_programa(df_programa):
             mode='lines+markers',
             line=dict(color=color, width=20),
             marker=dict(size=15, color=color),
-            name=row['Nombre STD'][:20],
-            text=f"{row['Nombre STD']}<br>Ton: {row.get('Toneladas Programadas', 'N/A')}",
+            name=row['Producto'][:20],
+            text=f"{row['Producto']}<br>Ton: {row.get('Toneladas Programadas', 'N/A')}",
             hovertemplate="%{text}<extra></extra>"
         ))
     
@@ -426,8 +414,6 @@ def comparar_productos_avanzado(df_a, df_b, columnas):
     df_resumen = pd.DataFrame(resumen)
     return df_resumen.sort_values(['Prioridad', 'Posición'])
 
-def mostrar_comparacion_mejorada(df_resumen):
-    """Muestra la comparación con visualización mejorada."""
     
     # Contar cambios por categoría
     cambios_por_categoria = df_resumen[df_resumen["¿Cambia?"] == "✅ Sí"]["Categoría"].value_counts()
@@ -502,7 +488,7 @@ def main():
     
     # Header principal
     st.markdown("""
-    <div class="main-header fade-in">
+    <div class="main-header">
         <h1>🏭 Sistema de Control de Cambios - Laminador</h1>
         <p>Plataforma avanzada para análisis y optimización de cambios de producto</p>
     </div>
@@ -528,8 +514,7 @@ def main():
         st.markdown("### ⚙️ Configuración")
         mostrar_solo_cambios = st.checkbox("Solo cambios", value=True)
         tema_oscuro = st.checkbox("Tema oscuro", value=False)
-        animaciones = st.checkbox("Animaciones", value=True)
-    
+            
     # Cargar datos base
     df_ddp, df_tiempo, df_desbaste = cargar_datos()
     if df_ddp is None:
@@ -662,9 +647,6 @@ def mostrar_comparacion_especifica(df_ddp, df_tiempo, df_desbaste, mostrar_solo_
         
         columnas_ddp = [col for col in df_a.columns if col not in ["STD", "Producto", "Familia"]]
         resumen_ddp = comparar_productos_avanzado(df_a, df_b, columnas_ddp)
-        
-        # Mostrar métricas de cambio
-        mostrar_comparacion_mejorada(resumen_ddp)
         
         # Tabla de cambios con filtros
         if mostrar_solo_cambios:
@@ -1093,7 +1075,7 @@ TOP 10 PRODUCTOS POR TONELAJE
     
     top_productos = df_resumen.nlargest(10, "Toneladas Programadas")
     for i, (_, row) in enumerate(top_productos.iterrows(), 1):
-        reporte += f"{i:2d}. {row['Nombre STD'][:30]:<30} {row['Toneladas Programadas']:>6,} ton\n"
+        reporte += f"{i:2d}. {row['Producto'][:30]:<30} {row['Toneladas Programadas']:>6,} ton\n"
     
     reporte += f"""
 
