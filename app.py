@@ -1332,3 +1332,13 @@ def mostrar_reportes_personalizados(df_ddp):
                 file_name="reporte_personalizado.txt",
                 mime="text/plain"
             )
+
+
+# =====================================
+# LLAMADA PRINCIPAL SEGURA
+# =====================================
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        st.error(f'❌ Error crítico al ejecutar la app: {e}')
