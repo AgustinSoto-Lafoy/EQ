@@ -196,36 +196,46 @@ with tabs[2]:
     st.title("🏭 Resumen Técnico para Maestranza")
 
     if "df_prog" in st.session_state:
-        df_prog = st.session_state.df_prog
-        productos = df_prog["Nombre STD"].dropna().unique().tolist()
-        df_filtrado = df_ddp[df_ddp["Producto"].isin(productos)].copy()
+        df_prog = st.session_state.df_prog.copy()
 
-        df_resumen = (
-            df_filtrado
-            .groupby("Producto")
-            .agg(
-                Cantidad_Cilindros=("STD", "nunique"),
-                STD_Necesarios=("STD", lambda x: ", ".join(sorted(x.unique(), key=lambda s: (len(s), s)))),
-                Codigos_Canal=("Código Canal", lambda x: ", ".join(sorted(x.dropna().unique())))
-            )
-            .reset_index()
-            .sort_values("Producto")
+        # Detectar bloques consecutivos del mismo producto
+        df_prog["Grupo"] = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
+
+        # Sumar toneladas programadas por bloque consecutivo
+        df_programa = (
+            df_prog
+            .groupby(["Grupo", "Nombre STD"], as_index=False)
+            .agg({"Toneladas Programadas": "sum"})
         )
+
+        # Traer códigos de canal por producto completo
+        codigos_por_producto = (
+            df_ddp.groupby("Producto")["Código Canal"]
+            .unique()
+            .apply(lambda x: ", ".join(sorted([str(c) for c in x if pd.notna(c)])))
+            .reset_index()
+            .rename(columns={"Producto": "Nombre STD", "Código Canal": "Códigos Canal"})
+        )
+
+        # Unir programa con info técnica
+        df_resumen = df_programa.merge(codigos_por_producto, on="Nombre STD", how="left")
+        df_resumen = df_resumen[["Nombre STD", "Toneladas Programadas", "Códigos Canal"]]
 
         st.dataframe(df_resumen, use_container_width=True)
 
-        if st.checkbox("📥 Exportar a Excel"):
-            import io
-            import pandas as pd
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                df_resumen.to_excel(writer, index=False, sheet_name="Resumen Maestranza")
-                writer.save()
-                st.download_button(
-                    label="Descargar Excel",
-                    data=buffer.getvalue(),
-                    file_name="Resumen_Maestranza.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+        # Botón de descarga al final
+        import io
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            df_resumen.to_excel(writer, index=False, sheet_name="Resumen Maestranza")
+        buffer.seek(0)
+
+        st.download_button(
+            label="📥 Descargar Excel",
+            data=buffer,
+            file_name="Resumen_Maestranza.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
         st.warning("Por favor carga primero el archivo de programa en la parte superior.")
+
