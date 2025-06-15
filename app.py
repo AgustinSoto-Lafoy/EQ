@@ -346,12 +346,12 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
 
 def mostrar_resumen_maestranza(df_ddp):
     """Muestra el resumen técnico para maestranza."""
-
+    
     df_prog = st.session_state.df_prog.copy()
-
+    
     # Detectar bloques consecutivos del mismo producto
     df_prog["Grupo"] = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
-
+    
     # Sumar toneladas programadas por bloque consecutivo
     df_programa = (
         df_prog
@@ -360,7 +360,7 @@ def mostrar_resumen_maestranza(df_ddp):
         .rename(columns={"PROGR": "Toneladas Programadas"})
     )
     df_programa["Toneladas Programadas"] = df_programa["Toneladas Programadas"].astype(int)
-
+    
     # Seleccionar primeras ocurrencias por Producto y STD
     posiciones_deseadas = ["M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6"]
     df_canal_unico = (
@@ -369,50 +369,88 @@ def mostrar_resumen_maestranza(df_ddp):
         .sort_values(["Producto", "STD"])
         .drop_duplicates(subset=["Producto", "STD"], keep="first")
     )
-
+    
     # Pivotear para obtener una columna por posición
     df_canal_pivot = df_canal_unico.pivot(index="Producto", columns="STD", values="Código Canal").reset_index()
     df_canal_pivot.columns.name = None
-
+    
     # Unir con programa
     df_resumen = df_programa.merge(df_canal_pivot, left_on="Nombre STD", right_on="Producto", how="left").drop(columns=["Producto"])
-
+    
     columnas_orden = ["Nombre STD", "Toneladas Programadas"] + posiciones_deseadas
     df_resumen = df_resumen[[col for col in columnas_orden if col in df_resumen.columns]]
-
+    
     st.dataframe(df_resumen, use_container_width=True)
-
-    # Tabla adicional: Frecuencia real de cada código de canal según el programa
-    st.markdown("### 🔁 Frecuencia de Cilindros en Programa")
-    df_resumen["Códigos Canal Lista"] = df_resumen["Códigos Canal"].apply(
-        lambda x: x.split(", ") if isinstance(x, str) else []
-    )
-    codigos_expandidos = df_resumen.explode("Códigos Canal Lista").copy()
-    codigos_expandidos = codigos_expandidos.rename(columns={"Códigos Canal Lista": "Código Canal"})
-    frecuencia_en_programa = (
-        codigos_expandidos
-        .groupby("Código Canal", dropna=True)
-        .agg(
-            Frecuencia=("Nombre STD", "count"),
-            Toneladas_Programadas=("Toneladas Programadas", "sum")
-        )
-        .reset_index()
-        .sort_values("Toneladas_Programadas", ascending=False)
-    )
-    st.dataframe(frecuencia_en_programa.set_index("Código Canal"), use_container_width=True)
-
-    # Botón de descarga (solo de la tabla principal)
+    
+    # Botón de descarga bajo la primera tabla
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         df_resumen.to_excel(writer, index=False, sheet_name="Resumen Maestranza")
     buffer.seek(0)
-
+    
     st.download_button(
-        label="📥 Descargar Excel",
+        label="📥 Descargar Resumen Maestranza",
         data=buffer,
         file_name="Resumen_Maestranza.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    
+    # ===============================================
+    # SECCIÓN DE FRECUENCIA DE CILINDROS CORREGIDA
+    # ===============================================
+    
+    st.markdown("### 🔁 Frecuencia de Cilindros en Programa")
+    
+    # Crear una lista con todos los códigos de canal para cada producto en el programa
+    codigos_programa = []
+    
+    for _, row in df_programa.iterrows():
+        producto = row["Nombre STD"]
+        toneladas = row["Toneladas Programadas"]
+        
+        # Obtener todos los códigos de canal para este producto
+        codigos_producto = df_ddp[df_ddp["Producto"] == producto]["Código Canal"].dropna().unique()
+        
+        # Agregar cada código con su información
+        for codigo in codigos_producto:
+            codigos_programa.append({
+                "Nombre STD": producto,
+                "Código Canal": codigo,
+                "Toneladas Programadas": toneladas
+            })
+    
+    # Convertir a DataFrame
+    df_codigos_programa = pd.DataFrame(codigos_programa)
+    
+    # Calcular frecuencia si hay datos
+    if not df_codigos_programa.empty:
+        frecuencia_en_programa = (
+            df_codigos_programa
+            .groupby("Código Canal", dropna=True)
+            .agg(
+                Frecuencia=("Nombre STD", "count"),
+                Toneladas_Programadas=("Toneladas Programadas", "sum")
+            )
+            .reset_index()
+            .sort_values("Toneladas_Programadas", ascending=False)
+        )
+        st.dataframe(frecuencia_en_programa.set_index("Código Canal"), use_container_width=True)
+        
+        # Botón adicional para descargar tabla completa con frecuencias
+        buffer_completo = io.BytesIO()
+        with pd.ExcelWriter(buffer_completo, engine="xlsxwriter") as writer:
+            df_resumen.to_excel(writer, index=False, sheet_name="Resumen Maestranza")
+            frecuencia_en_programa.to_excel(writer, index=False, sheet_name="Frecuencia Cilindros")
+        buffer_completo.seek(0)
+        
+        st.download_button(
+            label="📥 Descargar Excel Completo (con Frecuencias)",
+            data=buffer_completo,
+            file_name="Resumen_Completo_Maestranza.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.warning("No se encontraron códigos de canal para los productos en el programa.")
 
 # =====================================
 # EJECUCIÓN PRINCIPAL
