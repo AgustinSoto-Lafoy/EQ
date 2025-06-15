@@ -459,13 +459,8 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         else:
             st.warning("⚠️ **Tiempo de cambio:** No registrado para estos productos")
         
-        # Opción de filtro encima de las tablas
-        st.markdown("---")
-        col_filtro, col_space = st.columns([1, 3])
-        with col_filtro:
-            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=solo_cambios, key="filtro_tablas")
-        
         # Comparación técnica (DDP)
+        st.markdown("---")
         st.markdown("### 🔢 Análisis Técnico")
         
         columnas_ddp = [col for col in df_a.columns if col not in ["STD", "Producto", "Familia"]]
@@ -475,9 +470,14 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                 resumen_ddp = comparar_productos(df_a, df_b, columnas_ddp)
             
             if not resumen_ddp.empty:
+                # Opción de filtro encima de la tabla técnica
+                col_filtro1, col_space1 = st.columns([1, 3])
+                with col_filtro1:
+                    mostrar_solo_cambios_ddp = st.checkbox("📊 Solo mostrar cambios", value=solo_cambios, key="filtro_ddp")
+                
                 mostrar_metricas_resumen(resumen_ddp)
                 
-                if mostrar_solo_cambios:
+                if mostrar_solo_cambios_ddp:
                     resumen_filtrado = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
                     if resumen_filtrado.empty:
                         st.success("✅ **¡No hay cambios técnicos entre estos productos!**")
@@ -500,9 +500,14 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             df_desbaste_cmp = comparar_desbaste(df_desbaste, familia_a, familia_b)
         
         if not df_desbaste_cmp.empty:
+            # Opción de filtro encima de la tabla desbaste
+            col_filtro2, col_space2 = st.columns([1, 3])
+            with col_filtro2:
+                mostrar_solo_cambios_desbaste = st.checkbox("📊 Solo mostrar cambios", value=solo_cambios, key="filtro_desbaste")
+            
             mostrar_metricas_resumen(df_desbaste_cmp)
             
-            if mostrar_solo_cambios:
+            if mostrar_solo_cambios_desbaste:
                 desbaste_filtrado = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
                 if desbaste_filtrado.empty:
                     st.success("✅ **¡No hay cambios en el diagrama de desbaste!**")
@@ -983,11 +988,341 @@ def mostrar_analisis_utilaje(df_ddp):
             else:
                 st.warning("⚠️ Selecciona productos diferentes para compararlos.")
         
-        # Análisis general de utilaje
-        st.markdown("---")
-        st.markdown("### 📊 Análisis General de Utilaje")
+def mostrar_analisis_utilaje(df_ddp):
+    """Muestra el análisis detallado de utilaje."""
+    
+    try:
+        # Verificar que tenemos los datos necesarios
+        if df_ddp.empty:
+            st.warning("⚠️ No hay datos de productos disponibles para análisis de utilaje.")
+            return
         
-        mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles)
+        # Definir componentes de utilaje
+        componentes_utilaje = [
+            "Caja Guía Entrada",
+            "Caja Guía Salida", 
+            "Embudo Entrada",
+            "Embudo Salida",
+            "Código Polín Entrada",
+            "Código Polín Salida",
+            "Estabilización Entrada", 
+            "Estabilización Salida",
+            "Rodamiento Entrada",
+            "Rodamiento Salida",
+            "Semiguía Entrada",
+            "Semiguía Salida",
+            "Raspador Entrada",
+            "Raspador Salida"
+        ]
+        
+        # Verificar qué componentes existen en los datos
+        componentes_disponibles = [comp for comp in componentes_utilaje if comp in df_ddp.columns]
+        componentes_faltantes = [comp for comp in componentes_utilaje if comp not in df_ddp.columns]
+        
+        # Mostrar información de disponibilidad
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Productos", len(df_ddp["Producto"].unique()) if "Producto" in df_ddp.columns else 0)
+        with col2:
+            st.metric("Componentes Disponibles", len(componentes_disponibles))
+        with col3:
+            st.metric("Componentes Faltantes", len(componentes_faltantes))
+        
+        if componentes_faltantes:
+            with st.expander("⚠️ Componentes no encontrados en los datos"):
+                for comp in componentes_faltantes:
+                    st.write(f"• {comp}")
+        
+        if not componentes_disponibles:
+            st.error("❌ No se encontraron componentes de utilaje en los datos.")
+            return
+        
+        # Selector de productos para análisis individual
+        st.markdown("---")
+        st.markdown("### 🔍 Análisis Individual de Producto")
+        
+        productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
+        
+        if productos_disponibles:
+            col_prod, col_filtro = st.columns([2, 1])
+            
+            with col_prod:
+                producto_seleccionado = st.selectbox(
+                    "Selecciona un producto para ver su utilaje:",
+                    productos_disponibles,
+                    key="producto_utilaje"
+                )
+            
+            with col_filtro:
+                st.markdown("**Opciones:**")
+                mostrar_solo_definidos = st.checkbox("Solo mostrar componentes definidos", value=True)
+            
+            if producto_seleccionado:
+                mostrar_utilaje_producto(df_ddp, producto_seleccionado, componentes_disponibles, mostrar_solo_definidos)
+        
+        # Análisis comparativo de productos
+        st.markdown("---")
+        st.markdown("### 🆚 Comparación de Utilaje entre Productos")
+        
+        if len(productos_disponibles) >= 2:
+            col_a, col_b, col_opciones = st.columns([2, 2, 1])
+            
+            with col_a:
+                producto_a_util = st.selectbox(
+                    "Producto A:",
+                    productos_disponibles,
+                    key="producto_a_utilaje"
+                )
+            
+            with col_b:
+                producto_b_util = st.selectbox(
+                    "Producto B:",
+                    productos_disponibles,
+                    index=1 if len(productos_disponibles) > 1 else 0,
+                    key="producto_b_utilaje"
+                )
+            
+            with col_opciones:
+                st.markdown("**Opciones:**")
+                solo_diferencias = st.checkbox("Solo diferencias", value=True, key="solo_dif_utilaje")
+            
+            if producto_a_util != producto_b_util:
+                comparar_utilaje_productos(df_ddp, producto_a_util, producto_b_util, componentes_disponibles, solo_diferencias)
+            else:
+                st.warning("⚠️ Selecciona productos diferentes para compararlos.")
+        
+        # Secuencia de Producción - Reemplaza estadísticas generales
+        st.markdown("---")
+        st.markdown("### 📋 Secuencia de Producción - Utilaje Requerido")
+        
+        if "df_prog" in st.session_state:
+            mostrar_secuencia_utilaje(df_ddp, componentes_disponibles)
+        else:
+            st.info("📤 Por favor carga primero el archivo de programa para ver la secuencia de utilaje.")
+        
+    except Exception as e:
+        st.error(f"Error en análisis de utilaje: {str(e)}")
+        logger.error(f"Error en mostrar_analisis_utilaje: {str(e)}")
+
+def mostrar_secuencia_utilaje(df_ddp, componentes_disponibles):
+    """Muestra la secuencia de utilaje requerido para el programa de producción."""
+    
+    try:
+        df_prog = st.session_state.df_prog.copy()
+        
+        with st.spinner("Generando secuencia de utilaje..."):
+            # Detectar bloques consecutivos del mismo producto
+            df_prog["Grupo"] = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
+            
+            # Verificar que existe la columna PROGR
+            if "PROGR" not in df_prog.columns:
+                st.error("❌ El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
+                return
+            
+            # Agrupar y sumar toneladas por bloque consecutivo
+            df_programa = (
+                df_prog
+                .groupby(["Grupo", "Nombre STD"], as_index=False)
+                .agg({"PROGR": "sum"})
+                .rename(columns={"PROGR": "Toneladas Programadas"})
+            )
+            df_programa["Toneladas Programadas"] = df_programa["Toneladas Programadas"].astype(int)
+            
+            # Crear matriz de utilaje para la secuencia
+            utilaje_secuencia = []
+            
+            for _, row in df_programa.iterrows():
+                producto = row["Nombre STD"]
+                toneladas = row["Toneladas Programadas"]
+                
+                # Obtener datos del producto en DDP
+                datos_producto = df_ddp[df_ddp["Producto"] == producto]
+                
+                if not datos_producto.empty:
+                    # Crear fila base
+                    fila_utilaje = {
+                        "Nombre STD": producto,
+                        "Toneladas Programadas": toneladas
+                    }
+                    
+                    # Agregar cada componente de utilaje
+                    for componente in componentes_disponibles:
+                        if componente in datos_producto.columns:
+                            valores = datos_producto[componente].dropna().unique()
+                            if len(valores) > 0:
+                                # Si hay múltiples valores, mostrar el primero (o más común)
+                                valor_principal = valores[0] if len(valores) == 1 else f"{valores[0]} (+{len(valores)-1} más)"
+                                fila_utilaje[componente] = valor_principal
+                            else:
+                                fila_utilaje[componente] = "No definido"
+                        else:
+                            fila_utilaje[componente] = "No disponible"
+                    
+                    utilaje_secuencia.append(fila_utilaje)
+                else:
+                    # Producto no encontrado en DDP
+                    fila_utilaje = {"Nombre STD": producto, "Toneladas Programadas": toneladas}
+                    for componente in componentes_disponibles:
+                        fila_utilaje[componente] = "Producto no encontrado"
+                    utilaje_secuencia.append(fila_utilaje)
+            
+            # Convertir a DataFrame
+            df_utilaje_secuencia = pd.DataFrame(utilaje_secuencia)
+            
+            # Reordenar columnas
+            columnas_orden = ["Nombre STD", "Toneladas Programadas"] + componentes_disponibles
+            df_utilaje_secuencia = df_utilaje_secuencia[[col for col in columnas_orden if col in df_utilaje_secuencia.columns]]
+        
+        # Mostrar métricas de la secuencia
+        total_toneladas = df_utilaje_secuencia["Toneladas Programadas"].sum()
+        productos_unicos = df_utilaje_secuencia["Nombre STD"].nunique()
+        bloques_consecutivos = len(df_utilaje_secuencia)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Toneladas", f"{total_toneladas:,.0f}")
+        with col2:
+            st.metric("Productos Únicos", productos_unicos)
+        with col3:
+            st.metric("Bloques Consecutivos", bloques_consecutivos)
+        
+        # Mostrar tabla de secuencia con utilaje
+        st.markdown("#### 📋 Tabla de Secuencia con Utilaje")
+        
+        # Aplicar estilo condicional
+        def colorear_utilaje(val):
+            if pd.isna(val) or val == "No definido":
+                return 'background-color: #f8d7da'  # Rojo claro
+            elif val == "No disponible":
+                return 'background-color: #fff3cd'  # Amarillo claro
+            elif val == "Producto no encontrado":
+                return 'background-color: #f8d7da'  # Rojo claro
+            elif "más" in str(val):
+                return 'background-color: #fff3cd'  # Amarillo para múltiples valores
+            else:
+                return 'background-color: #d1edff'  # Azul claro para valores definidos
+        
+        # Aplicar estilo solo a columnas de utilaje (no a Nombre STD y Toneladas)
+        columnas_estilo = [col for col in df_utilaje_secuencia.columns if col not in ["Nombre STD", "Toneladas Programadas"]]
+        
+        styled_df = df_utilaje_secuencia.style.applymap(
+            colorear_utilaje,
+            subset=columnas_estilo
+        )
+        
+        st.dataframe(styled_df, use_container_width=True)
+        
+        # Leyenda de colores
+        with st.expander("🎨 Leyenda de colores"):
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown("🔵 **Azul:** Valor definido")
+            with col2:
+                st.markdown("🟡 **Amarillo:** Múltiples valores o no disponible")
+            with col3:
+                st.markdown("🔴 **Rojo:** No definido o producto no encontrado")
+            with col4:
+                st.markdown("⚪ **Sin color:** Información del programa")
+        
+        # Análisis de cambios de utilaje en la secuencia
+        st.markdown("---")
+        st.markdown("#### 🔄 Análisis de Cambios de Utilaje en Secuencia")
+        
+        cambios_utilaje = []
+        for i in range(len(df_utilaje_secuencia) - 1):
+            producto_actual = df_utilaje_secuencia.iloc[i]["Nombre STD"]
+            producto_siguiente = df_utilaje_secuencia.iloc[i + 1]["Nombre STD"]
+            
+            # Contar cambios por componente
+            cambios_por_componente = 0
+            cambios_detalle = []
+            
+            for componente in componentes_disponibles:
+                if componente in df_utilaje_secuencia.columns:
+                    valor_actual = df_utilaje_secuencia.iloc[i][componente]
+                    valor_siguiente = df_utilaje_secuencia.iloc[i + 1][componente]
+                    
+                    if valor_actual != valor_siguiente:
+                        cambios_por_componente += 1
+                        cambios_detalle.append(f"{componente}: {valor_actual} → {valor_siguiente}")
+            
+            cambios_utilaje.append({
+                "Secuencia": i + 1,
+                "Cambio": f"{producto_actual} → {producto_siguiente}",
+                "Cambios de Utilaje": cambios_por_componente,
+                "Detalle": "; ".join(cambios_detalle[:3]) + ("..." if len(cambios_detalle) > 3 else "")
+            })
+        
+        if cambios_utilaje:
+            df_cambios_utilaje = pd.DataFrame(cambios_utilaje)
+            
+            # Mostrar solo cambios con al menos 1 modificación
+            df_cambios_filtrado = df_cambios_utilaje[df_cambios_utilaje["Cambios de Utilaje"] > 0]
+            
+            if not df_cambios_filtrado.empty:
+                st.dataframe(df_cambios_filtrado, use_container_width=True, hide_index=True)
+                
+                # Métricas de cambios
+                total_cambios = len(df_cambios_filtrado)
+                cambios_promedio = df_cambios_filtrado["Cambios de Utilaje"].mean()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Cambios de Utilaje", total_cambios)
+                with col2:
+                    st.metric("Cambios Promedio", f"{cambios_promedio:.1f}")
+            else:
+                st.success("✅ **¡No hay cambios de utilaje en toda la secuencia!**")
+        
+        # Exportación
+        st.markdown("---")
+        st.markdown("### 📥 Exportar Secuencia de Utilaje")
+        
+        try:
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                # Hoja principal: Secuencia con utilaje
+                df_utilaje_secuencia.to_excel(writer, index=False, sheet_name="Secuencia_Utilaje")
+                
+                # Hoja de cambios
+                if 'df_cambios_utilaje' in locals() and not df_cambios_utilaje.empty:
+                    df_cambios_utilaje.to_excel(writer, index=False, sheet_name="Cambios_Utilaje")
+                
+                # Hoja con programa original
+                st.session_state.df_prog.to_excel(writer, index=False, sheet_name="Programa_Original")
+                
+                # Formatear hojas
+                workbook = writer.book
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'bg_color': '#4CAF50',
+                    'font_color': 'white',
+                    'border': 1
+                })
+                
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    worksheet.set_row(0, 20, header_format)
+                    worksheet.autofit()
+            
+            buffer.seek(0)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            filename = f"Secuencia_Utilaje_{timestamp}.xlsx"
+            
+            st.download_button(
+                label="📊 Descargar Secuencia de Utilaje",
+                data=buffer,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Incluye secuencia completa, análisis de cambios y programa original"
+            )
+        except Exception as e:
+            st.error(f"Error generando archivo de exportación: {str(e)}")
+        
+    except Exception as e:
+        st.error(f"Error generando secuencia de utilaje: {str(e)}")
+        logger.error(f"Error en mostrar_secuencia_utilaje: {str(e)}")
         
     except Exception as e:
         st.error(f"Error en análisis de utilaje: {str(e)}")
