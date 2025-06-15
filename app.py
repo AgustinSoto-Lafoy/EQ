@@ -366,10 +366,10 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         st.error("❌ El archivo DDP debe contener las columnas 'Familia' y 'Producto'")
         return
     
-    # Selección de familias
+    # Selección de familias con ancho uniforme
     familias = ["(Todos)"] + sorted(df_ddp["Familia"].dropna().unique())
     
-    col_f1, col_f2, col_config = st.columns([1, 1, 1])
+    col_f1, col_f2, col_config = st.columns([2, 2, 1])
     
     with col_f1:
         familia_a = st.selectbox("🏷️ Familia A", familias, key="famA")
@@ -398,8 +398,8 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         st.error(f"Error filtrando productos: {str(e)}")
         return
     
-    # Selección de productos
-    col_a, col_b = st.columns(2)
+    # Selección de productos con ancho uniforme
+    col_a, col_b = st.columns([2, 2])
     
     with col_a:
         if productos_a:
@@ -440,23 +440,20 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             st.warning("⚠️ No se encontraron datos para uno o ambos productos.")
             return
         
-        # Mostrar tiempos de cambio
-        st.markdown("### ⏱️ Tiempos de Cambio")
-        col1, col2 = st.columns(2)
+        # Mostrar tiempo de cambio simplificado
+        st.markdown("### ⏱️ Tiempo de Cambio")
         
-        with col1:
-            tiempo_ab = obtener_tiempo_cambio(df_tiempo, producto_a, producto_b)
-            if tiempo_ab:
-                st.success(f"**A → B:** {tiempo_ab} min")
-            else:
-                st.warning("**A → B:** No registrado")
+        # Buscar tiempo en ambas direcciones (ya que puede estar registrado en cualquier dirección)
+        tiempo_ab = obtener_tiempo_cambio(df_tiempo, producto_a, producto_b)
+        tiempo_ba = obtener_tiempo_cambio(df_tiempo, producto_b, producto_a)
         
-        with col2:
-            tiempo_ba = obtener_tiempo_cambio(df_tiempo, producto_b, producto_a)
-            if tiempo_ba:
-                st.success(f"**B → A:** {tiempo_ba} min")
-            else:
-                st.warning("**B → A:** No registrado")
+        # Tomar el tiempo que esté disponible
+        tiempo_cambio = tiempo_ab if tiempo_ab is not None else tiempo_ba
+        
+        if tiempo_cambio:
+            st.success(f"🔄 **Tiempo de cambio:** {tiempo_cambio} minutos")
+        else:
+            st.warning("⚠️ **Tiempo de cambio:** No registrado para estos productos")
         
         # Comparación técnica (DDP)
         st.markdown("---")
@@ -648,7 +645,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
         logger.error(f"Error en mostrar_secuencia_programa: {str(e)}")
 
 def mostrar_resumen_maestranza(df_ddp):
-    """Muestra el resumen técnico para maestranza."""
+    """Muestra el resumen técnico para maestranza con análisis de cilindros."""
     
     try:
         df_prog = st.session_state.df_prog.copy()
@@ -669,58 +666,52 @@ def mostrar_resumen_maestranza(df_ddp):
                 .agg({"PROGR": "sum"})
                 .rename(columns={"PROGR": "Toneladas Programadas"})
             )
+            df_programa["Toneladas Programadas"] = df_programa["Toneladas Programadas"].astype(int)
             
-            # Obtener información técnica adicional
-            info_tecnica_dict = {}
-            for producto in df_programa["Nombre STD"].unique():
-                try:
-                    producto_data = df_ddp[df_ddp["Producto"] == producto]
-                    if not producto_data.empty:
-                        # Códigos de canal
-                        if "Código Canal" in producto_data.columns:
-                            codigos = producto_data["Código Canal"].dropna().unique()
-                            codigos_str = ", ".join(sorted([str(c) for c in codigos]))
-                        else:
-                            codigos_str = "N/A"
-                        
-                        # Familia
-                        if "Familia" in producto_data.columns:
-                            familia = producto_data["Familia"].iloc[0] if not producto_data.empty else "N/A"
-                        else:
-                            familia = "N/A"
-                        
-                        info_tecnica_dict[producto] = {
-                            "Familia": familia,
-                            "Código Canal": codigos_str
-                        }
-                    else:
-                        info_tecnica_dict[producto] = {
-                            "Familia": "N/A",
-                            "Código Canal": "N/A"
-                        }
-                except Exception as e:
-                    logger.error(f"Error procesando producto {producto}: {str(e)}")
-                    info_tecnica_dict[producto] = {
-                        "Familia": "N/A",
-                        "Código Canal": "N/A"
-                    }
+            # Seleccionar primeras ocurrencias por Producto y STD para posiciones específicas
+            posiciones_deseadas = ["M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6"]
             
-            # Crear DataFrame de información técnica
-            info_tecnica = pd.DataFrame.from_dict(info_tecnica_dict, orient='index').reset_index()
-            info_tecnica.columns = ["Nombre STD", "Familia", "Código Canal"]
-            
-            # Unir programa con información técnica
-            df_resumen = df_programa.merge(info_tecnica, on="Nombre STD", how="left")
-            
-            # Reordenar columnas y mantener orden por grupo
-            df_resumen = df_resumen.sort_values("Grupo").reset_index(drop=True)
-            df_resumen = df_resumen[["Nombre STD", "Toneladas Programadas", "Familia", "Código Canal"]]
+            # Verificar que tenemos las columnas necesarias
+            if "STD" in df_ddp.columns and "Código Canal" in df_ddp.columns:
+                df_canal_unico = (
+                    df_ddp[df_ddp["STD"].isin(posiciones_deseadas)]
+                    .dropna(subset=["Código Canal"])
+                    .sort_values(["Producto", "STD"])
+                    .drop_duplicates(subset=["Producto", "STD"], keep="first")
+                )
+                
+                # Pivotear para obtener una columna por posición
+                if not df_canal_unico.empty:
+                    df_canal_pivot = df_canal_unico.pivot(
+                        index="Producto", 
+                        columns="STD", 
+                        values="Código Canal"
+                    ).reset_index()
+                    df_canal_pivot.columns.name = None
+                    
+                    # Unir con programa
+                    df_resumen = df_programa.merge(
+                        df_canal_pivot, 
+                        left_on="Nombre STD", 
+                        right_on="Producto", 
+                        how="left"
+                    ).drop(columns=["Producto"], errors='ignore')
+                    
+                    # Ordenar columnas
+                    columnas_orden = ["Nombre STD", "Toneladas Programadas"] + posiciones_deseadas
+                    df_resumen = df_resumen[[col for col in columnas_orden if col in df_resumen.columns]]
+                else:
+                    # Si no hay datos de pivote, usar solo programa base
+                    df_resumen = df_programa[["Nombre STD", "Toneladas Programadas"]]
+            else:
+                # Si no tenemos las columnas necesarias, usar solo programa base
+                df_resumen = df_programa[["Nombre STD", "Toneladas Programadas"]]
+                st.warning("⚠️ No se encontraron columnas 'STD' o 'Código Canal' para análisis detallado")
         
         # Mostrar métricas generales
         try:
             total_toneladas = df_resumen["Toneladas Programadas"].sum()
             productos_unicos = df_resumen["Nombre STD"].nunique()
-            familias_unicas = df_resumen["Familia"].nunique()
             
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -728,79 +719,136 @@ def mostrar_resumen_maestranza(df_ddp):
             with col2:
                 st.metric("Productos Únicos", productos_unicos)
             with col3:
-                st.metric("Familias", familias_unicas)
+                bloques_consecutivos = len(df_resumen)
+                st.metric("Bloques Consecutivos", bloques_consecutivos)
         except Exception as e:
             logger.error(f"Error calculando métricas maestranza: {str(e)}")
         
-        # Análisis por familia
-        st.markdown("---")
-        st.markdown("### 📊 Distribución por Familia")
+        # Tabla principal
+        st.markdown("### 📋 Resumen Detallado por Producto")
+        st.dataframe(df_resumen, use_container_width=True)
+        
+        # ===============================================
+        # SECCIÓN DE FRECUENCIA DE CILINDROS
+        # ===============================================
+        
+        st.markdown("### 🔁 Frecuencia de Cilindros en Programa")
         
         try:
-            resumen_familias = (
-                df_resumen.groupby("Familia", as_index=False)
-                .agg({
-                    "Toneladas Programadas": "sum",
-                    "Nombre STD": "count"
-                })
-                .rename(columns={"Nombre STD": "Cantidad Productos"})
-                .sort_values("Toneladas Programadas", ascending=False)
-            )
+            # Crear una lista con todos los códigos de canal para cada producto en el programa
+            codigos_programa = []
             
-            st.dataframe(resumen_familias, use_container_width=True)
+            for _, row in df_programa.iterrows():
+                producto = row["Nombre STD"]
+                toneladas = row["Toneladas Programadas"]
+                
+                # Obtener todos los códigos de canal para este producto
+                if "Código Canal" in df_ddp.columns:
+                    codigos_producto = df_ddp[df_ddp["Producto"] == producto]["Código Canal"].dropna().unique()
+                    
+                    # Agregar cada código con su información
+                    for codigo in codigos_producto:
+                        codigos_programa.append({
+                            "Nombre STD": producto,
+                            "Código Canal": codigo,
+                            "Toneladas Programadas": toneladas
+                        })
+            
+            # Convertir a DataFrame
+            df_codigos_programa = pd.DataFrame(codigos_programa)
+            
+            # Calcular frecuencia si hay datos
+            if not df_codigos_programa.empty:
+                frecuencia_en_programa = (
+                    df_codigos_programa
+                    .groupby("Código Canal", dropna=True)
+                    .agg(
+                        Frecuencia=("Nombre STD", "count"),
+                        Toneladas_Programadas=("Toneladas Programadas", "sum")
+                    )
+                    .reset_index()
+                    .sort_values("Toneladas_Programadas", ascending=False)
+                )
+                
+                # Mostrar tabla de frecuencias
+                st.dataframe(frecuencia_en_programa.set_index("Código Canal"), use_container_width=True)
+                
+                # Mostrar métricas de cilindros
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Cilindros Únicos", len(frecuencia_en_programa))
+                with col2:
+                    cilindro_mas_usado = frecuencia_en_programa.iloc[0]["Código Canal"] if not frecuencia_en_programa.empty else "N/A"
+                    st.metric("Cilindro Más Usado", cilindro_mas_usado)
+                with col3:
+                    max_frecuencia = frecuencia_en_programa.iloc[0]["Frecuencia"] if not frecuencia_en_programa.empty else 0
+                    st.metric("Frecuencia Máxima", max_frecuencia)
+                
+            else:
+                st.warning("No se encontraron códigos de canal para los productos en el programa.")
+                frecuencia_en_programa = pd.DataFrame()
+                
         except Exception as e:
-            logger.error(f"Error creando resumen por familias: {str(e)}")
-            st.error("Error creando resumen por familias")
+            logger.error(f"Error calculando frecuencia de cilindros: {str(e)}")
+            st.error("Error calculando frecuencia de cilindros")
+            frecuencia_en_programa = pd.DataFrame()
         
-        # Tabla principal
-        st.markdown("---")
-        st.markdown("### 📋 Resumen Detallado por Producto")
+        # ===============================================
+        # EXPORTACIÓN MEJORADA
+        # ===============================================
         
-        # Formatear la tabla para mejor visualización
-        df_display = df_resumen.copy()
-        df_display["Toneladas Programadas"] = df_display["Toneladas Programadas"].apply(lambda x: f"{x:,.1f}")
-        
-        st.dataframe(df_display, use_container_width=True)
-        
-        # Exportación
         st.markdown("---")
         st.markdown("### 📥 Exportar Datos")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Excel con múltiples hojas
+            # Excel completo con múltiples hojas
             try:
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                buffer_completo = io.BytesIO()
+                with pd.ExcelWriter(buffer_completo, engine="xlsxwriter") as writer:
                     # Hoja principal
                     df_resumen.to_excel(writer, index=False, sheet_name="Resumen_Maestranza")
                     
-                    # Hoja de resumen por familias
-                    if 'resumen_familias' in locals():
-                        resumen_familias.to_excel(writer, index=False, sheet_name="Resumen_Familias")
+                    # Hoja de frecuencia de cilindros
+                    if not frecuencia_en_programa.empty:
+                        frecuencia_en_programa.to_excel(writer, index=False, sheet_name="Frecuencia_Cilindros")
                     
                     # Hoja con programa completo
                     st.session_state.df_prog.to_excel(writer, index=False, sheet_name="Programa_Completo")
+                    
+                    # Formatear hojas
+                    workbook = writer.book
+                    header_format = workbook.add_format({
+                        'bold': True,
+                        'bg_color': '#4CAF50',
+                        'font_color': 'white',
+                        'border': 1
+                    })
+                    
+                    for sheet_name in writer.sheets:
+                        worksheet = writer.sheets[sheet_name]
+                        worksheet.set_row(0, 20, header_format)
+                        worksheet.autofit()
                 
-                buffer.seek(0)
+                buffer_completo.seek(0)
                 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
                 filename = f"Resumen_Maestranza_{timestamp}.xlsx"
                 
                 st.download_button(
-                    label="📊 Descargar Excel Completo",
-                    data=buffer,
+                    label="📊 Descargar Resumen Técnico Completo",
+                    data=buffer_completo,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    help="Incluye resumen principal, análisis por familias y programa completo"
+                    help="Incluye resumen maestranza, frecuencia de cilindros y programa completo"
                 )
             except Exception as e:
-                logger.error(f"Error creando Excel: {str(e)}")
-                st.error("Error generando archivo Excel")
+                logger.error(f"Error creando Excel completo: {str(e)}")
+                st.error("Error generando archivo Excel completo")
         
         with col2:
-            # CSV simple
+            # CSV del resumen principal
             try:
                 csv_buffer = io.StringIO()
                 df_resumen.to_csv(csv_buffer, index=False, encoding='utf-8')
@@ -809,11 +857,11 @@ def mostrar_resumen_maestranza(df_ddp):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
                 
                 st.download_button(
-                    label="📄 Descargar CSV",
+                    label="📄 Descargar CSV Resumen",
                     data=csv_data,
                     file_name=f"resumen_maestranza_{timestamp}.csv",
                     mime="text/csv",
-                    help="Archivo CSV simple para análisis adicional"
+                    help="Solo el resumen principal en formato CSV"
                 )
             except Exception as e:
                 logger.error(f"Error creando CSV: {str(e)}")
