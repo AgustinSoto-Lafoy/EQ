@@ -381,12 +381,17 @@ def mostrar_resumen_maestranza(df_ddp):
     df_resumen["Códigos Canal Lista"] = df_resumen["Códigos Canal"].apply(
         lambda x: x.split(", ") if isinstance(x, str) else []
     )
-    codigos_expandidos = df_resumen.explode("Códigos Canal Lista")
+    codigos_expandidos = df_resumen.explode("Códigos Canal Lista").copy()
+    codigos_expandidos = codigos_expandidos.rename(columns={"Códigos Canal Lista": "Código Canal"})
     frecuencia_en_programa = (
-        codigos_expandidos["Códigos Canal Lista"]
-        .value_counts()
+        codigos_expandidos
+        .groupby("Código Canal", dropna=True)
+        .agg(
+            Frecuencia=("Nombre STD", "count"),
+            Toneladas_Programadas=("Toneladas Programadas", "sum")
+        )
         .reset_index()
-        .rename(columns={"index": "Código Canal", "Códigos Canal Lista": "Frecuencia en Programa"})
+        .sort_values("Toneladas_Programadas", ascending=False)
     )
     st.dataframe(frecuencia_en_programa, use_container_width=True)
 
