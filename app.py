@@ -94,6 +94,38 @@ with tabs[0]:
             resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
         st.dataframe(resumen_ddp.style.apply(resaltar, axis=1))
 
+        resumen_desbaste = []
+        desbA = df_desbaste[df_desbaste["Familia"] == familiaA] if familiaA != "(Todos)" else df_desbaste
+        desbB = df_desbaste[df_desbaste["Familia"] == familiaB] if familiaB != "(Todos)" else df_desbaste
+
+        pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
+        for substd, comp in pares:
+            val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
+            val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
+            val1 = val1[0] if len(val1) > 0 else None
+            val2 = val2[0] if len(val2) > 0 else None
+            if (val1 is None or pd.isna(val1)) and (val2 is None or pd.isna(val2)):
+                continue
+            cambia = val1 != val2
+            resumen_desbaste.append({
+                "Posición": substd,
+                "Componente": comp,
+                "Valor A": val1,
+                "Valor B": val2,
+                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
+            })
+        df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
+        st.markdown("### 🧠 Diagrama Desbaste")
+        if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
+            df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
+        st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar, axis=1))
+
+        st.markdown("### 📊 Resumen de cambios")
+        resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
+        conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
+        conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
+        st.dataframe(conteo_por_componente)
+
 # --- FUNCIONES COMUNES ---
 def agrupar_cambios_consecutivos(df):
     columnas_clave = ["Producto Origen", "Producto Destino", "Familia"]
@@ -161,12 +193,39 @@ with tabs[1]:
 
 # --- PESTAÑA MAESTRANZA ---
 with tabs[2]:
-    st.title("🏭 Códigos de Canal por Producto en Programa")
+    st.title("🏭 Resumen Técnico para Maestranza")
+
     if "df_prog" in st.session_state:
         df_prog = st.session_state.df_prog
         productos = df_prog["Nombre STD"].dropna().unique().tolist()
-        df_maestranza = df_ddp[df_ddp["Producto"].isin(productos)].copy()
-        df_maestranza = df_maestranza[["Producto", "STD", "Código Canal"]].sort_values(by=["Producto", "STD"])
-        st.dataframe(df_maestranza, use_container_width=True)
+        df_filtrado = df_ddp[df_ddp["Producto"].isin(productos)].copy()
+
+        df_resumen = (
+            df_filtrado
+            .groupby("Producto")
+            .agg(
+                Cantidad_Cilindros=("STD", "nunique"),
+                STD_Necesarios=("STD", lambda x: ", ".join(sorted(x.unique(), key=lambda s: (len(s), s)))),
+                Codigos_Canal=("Código Canal", lambda x: ", ".join(sorted(x.dropna().unique())))
+            )
+            .reset_index()
+            .sort_values("Producto")
+        )
+
+        st.dataframe(df_resumen, use_container_width=True)
+
+        if st.checkbox("📥 Exportar a Excel"):
+            import io
+            import pandas as pd
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                df_resumen.to_excel(writer, index=False, sheet_name="Resumen Maestranza")
+                writer.save()
+                st.download_button(
+                    label="Descargar Excel",
+                    data=buffer.getvalue(),
+                    file_name="Resumen_Maestranza.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
     else:
         st.warning("Por favor carga primero el archivo de programa en la parte superior.")
