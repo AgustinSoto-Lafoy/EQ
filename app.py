@@ -334,7 +334,8 @@ def main():
     tabs = st.tabs([
         "🔍 Comparador Manual", 
         "📋 Análisis de Secuencia", 
-        "🏭 Resumen Maestranza"
+        "🏭 Resumen Maestranza",
+        "🔧 Utilaje"
     ])
     
     # PESTAÑA 1: COMPARADOR MANUAL
@@ -357,6 +358,11 @@ def main():
             mostrar_resumen_maestranza(df_ddp)
         else:
             st.info("📤 Por favor carga primero el archivo de programa.")
+
+    # PESTAÑA 4: UTILAJE
+    with tabs[3]:
+        st.subheader("🔧 Análisis de Utilaje")
+        mostrar_analisis_utilaje(df_ddp)
 
 def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     """Muestra el comparador manual de productos."""
@@ -440,10 +446,8 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             st.warning("⚠️ No se encontraron datos para uno o ambos productos.")
             return
         
-        # Mostrar tiempo de cambio simplificado
-        st.markdown("### ⏱️ Tiempo de Cambio")
-        
-        # Buscar tiempo en ambas direcciones (ya que puede estar registrado en cualquier dirección)
+        # Mostrar tiempo de cambio sin título propio
+        # Buscar tiempo en ambas direcciones
         tiempo_ab = obtener_tiempo_cambio(df_tiempo, producto_a, producto_b)
         tiempo_ba = obtener_tiempo_cambio(df_tiempo, producto_b, producto_a)
         
@@ -451,12 +455,17 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         tiempo_cambio = tiempo_ab if tiempo_ab is not None else tiempo_ba
         
         if tiempo_cambio:
-            st.success(f"🔄 **Tiempo de cambio:** {tiempo_cambio} minutos")
+            st.success(f"⏱️ **Tiempo de cambio:** {tiempo_cambio} minutos")
         else:
             st.warning("⚠️ **Tiempo de cambio:** No registrado para estos productos")
         
-        # Comparación técnica (DDP)
+        # Opción de filtro encima de las tablas
         st.markdown("---")
+        col_filtro, col_space = st.columns([1, 3])
+        with col_filtro:
+            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=solo_cambios, key="filtro_tablas")
+        
+        # Comparación técnica (DDP)
         st.markdown("### 🔢 Análisis Técnico")
         
         columnas_ddp = [col for col in df_a.columns if col not in ["STD", "Producto", "Familia"]]
@@ -468,7 +477,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             if not resumen_ddp.empty:
                 mostrar_metricas_resumen(resumen_ddp)
                 
-                if solo_cambios:
+                if mostrar_solo_cambios:
                     resumen_filtrado = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
                     if resumen_filtrado.empty:
                         st.success("✅ **¡No hay cambios técnicos entre estos productos!**")
@@ -493,7 +502,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         if not df_desbaste_cmp.empty:
             mostrar_metricas_resumen(df_desbaste_cmp)
             
-            if solo_cambios:
+            if mostrar_solo_cambios:
                 desbaste_filtrado = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
                 if desbaste_filtrado.empty:
                     st.success("✅ **¡No hay cambios en el diagrama de desbaste!**")
@@ -871,9 +880,411 @@ def mostrar_resumen_maestranza(df_ddp):
         st.error(f"Error generando resumen maestranza: {str(e)}")
         logger.error(f"Error en mostrar_resumen_maestranza: {str(e)}")
 
-# =====================================
-# EJECUCIÓN PRINCIPAL
-# =====================================
+def mostrar_analisis_utilaje(df_ddp):
+    """Muestra el análisis detallado de utilaje."""
+    
+    try:
+        # Verificar que tenemos los datos necesarios
+        if df_ddp.empty:
+            st.warning("⚠️ No hay datos de productos disponibles para análisis de utilaje.")
+            return
+        
+        # Definir componentes de utilaje
+        componentes_utilaje = [
+            "Caja Guía Entrada",
+            "Caja Guía Salida", 
+            "Embudo Entrada",
+            "Embudo Salida",
+            "Código Polín Entrada",
+            "Código Polín Salida",
+            "Estabilización Entrada", 
+            "Estabilización Salida",
+            "Rodamiento Entrada",
+            "Rodamiento Salida",
+            "Semiguía Entrada",
+            "Semiguía Salida",
+            "Raspador Entrada",
+            "Raspador Salida"
+        ]
+        
+        # Verificar qué componentes existen en los datos
+        componentes_disponibles = [comp for comp in componentes_utilaje if comp in df_ddp.columns]
+        componentes_faltantes = [comp for comp in componentes_utilaje if comp not in df_ddp.columns]
+        
+        # Mostrar información de disponibilidad
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Productos", len(df_ddp["Producto"].unique()) if "Producto" in df_ddp.columns else 0)
+        with col2:
+            st.metric("Componentes Disponibles", len(componentes_disponibles))
+        with col3:
+            st.metric("Componentes Faltantes", len(componentes_faltantes))
+        
+        if componentes_faltantes:
+            with st.expander("⚠️ Componentes no encontrados en los datos"):
+                for comp in componentes_faltantes:
+                    st.write(f"• {comp}")
+        
+        if not componentes_disponibles:
+            st.error("❌ No se encontraron componentes de utilaje en los datos.")
+            return
+        
+        # Selector de productos para análisis individual
+        st.markdown("---")
+        st.markdown("### 🔍 Análisis Individual de Producto")
+        
+        productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
+        
+        if productos_disponibles:
+            col_prod, col_filtro = st.columns([2, 1])
+            
+            with col_prod:
+                producto_seleccionado = st.selectbox(
+                    "Selecciona un producto para ver su utilaje:",
+                    productos_disponibles,
+                    key="producto_utilaje"
+                )
+            
+            with col_filtro:
+                st.markdown("**Opciones:**")
+                mostrar_solo_definidos = st.checkbox("Solo mostrar componentes definidos", value=True)
+            
+            if producto_seleccionado:
+                mostrar_utilaje_producto(df_ddp, producto_seleccionado, componentes_disponibles, mostrar_solo_definidos)
+        
+        # Análisis comparativo de productos
+        st.markdown("---")
+        st.markdown("### 🆚 Comparación de Utilaje entre Productos")
+        
+        if len(productos_disponibles) >= 2:
+            col_a, col_b, col_opciones = st.columns([2, 2, 1])
+            
+            with col_a:
+                producto_a_util = st.selectbox(
+                    "Producto A:",
+                    productos_disponibles,
+                    key="producto_a_utilaje"
+                )
+            
+            with col_b:
+                producto_b_util = st.selectbox(
+                    "Producto B:",
+                    productos_disponibles,
+                    index=1 if len(productos_disponibles) > 1 else 0,
+                    key="producto_b_utilaje"
+                )
+            
+            with col_opciones:
+                st.markdown("**Opciones:**")
+                solo_diferencias = st.checkbox("Solo diferencias", value=True, key="solo_dif_utilaje")
+            
+            if producto_a_util != producto_b_util:
+                comparar_utilaje_productos(df_ddp, producto_a_util, producto_b_util, componentes_disponibles, solo_diferencias)
+            else:
+                st.warning("⚠️ Selecciona productos diferentes para compararlos.")
+        
+        # Análisis general de utilaje
+        st.markdown("---")
+        st.markdown("### 📊 Análisis General de Utilaje")
+        
+        mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles)
+        
+    except Exception as e:
+        st.error(f"Error en análisis de utilaje: {str(e)}")
+        logger.error(f"Error en mostrar_analisis_utilaje: {str(e)}")
+
+def mostrar_utilaje_producto(df_ddp, producto, componentes_disponibles, mostrar_solo_definidos=True):
+    """Muestra el detalle de utilaje para un producto específico."""
+    
+    try:
+        # Filtrar datos del producto
+        datos_producto = df_ddp[df_ddp["Producto"] == producto]
+        
+        if datos_producto.empty:
+            st.warning(f"⚠️ No se encontraron datos para el producto {producto}")
+            return
+        
+        # Crear tabla de utilaje
+        utilaje_data = []
+        
+        for componente in componentes_disponibles:
+            valores_componente = datos_producto[componente].dropna().unique()
+            
+            # Si solo mostrar definidos y no hay valores, saltar
+            if mostrar_solo_definidos and (len(valores_componente) == 0 or (len(valores_componente) == 1 and pd.isna(valores_componente[0]))):
+                continue
+            
+            # Procesar valores
+            if len(valores_componente) == 0:
+                valor_mostrar = "No definido"
+            elif len(valores_componente) == 1:
+                valor_mostrar = str(valores_componente[0]) if not pd.isna(valores_componente[0]) else "No definido"
+            else:
+                valor_mostrar = ", ".join([str(v) for v in valores_componente if not pd.isna(v)])
+            
+            utilaje_data.append({
+                "Componente": componente,
+                "Valor": valor_mostrar,
+                "Múltiples Valores": "Sí" if len(valores_componente) > 1 else "No"
+            })
+        
+        if utilaje_data:
+            df_utilaje = pd.DataFrame(utilaje_data)
+            
+            # Aplicar estilo condicional
+            def resaltar_multiples(row):
+                if row["Múltiples Valores"] == "Sí":
+                    return ['background-color: #fff3cd'] * len(row)
+                elif row["Valor"] == "No definido":
+                    return ['background-color: #f8d7da'] * len(row)
+                else:
+                    return ['background-color: #d1edff'] * len(row)
+            
+            st.dataframe(
+                df_utilaje.style.apply(resaltar_multiples, axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Mostrar leyenda de colores
+            with st.expander("📋 Leyenda de colores"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.markdown("🔵 **Azul:** Valor único definido")
+                with col2:
+                    st.markdown("🟡 **Amarillo:** Múltiples valores")
+                with col3:
+                    st.markdown("🔴 **Rojo:** No definido")
+        else:
+            st.info("ℹ️ No hay componentes de utilaje definidos para este producto (o todos están ocultos por el filtro).")
+            
+    except Exception as e:
+        st.error(f"Error mostrando utilaje del producto: {str(e)}")
+        logger.error(f"Error en mostrar_utilaje_producto: {str(e)}")
+
+def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_disponibles, solo_diferencias=True):
+    """Compara el utilaje entre dos productos."""
+    
+    try:
+        # Obtener datos de ambos productos
+        datos_a = df_ddp[df_ddp["Producto"] == producto_a]
+        datos_b = df_ddp[df_ddp["Producto"] == producto_b]
+        
+        if datos_a.empty or datos_b.empty:
+            st.warning("⚠️ No se encontraron datos para uno o ambos productos.")
+            return
+        
+        # Crear comparación
+        comparacion_data = []
+        
+        for componente in componentes_disponibles:
+            # Obtener valores únicos de cada producto
+            valores_a = datos_a[componente].dropna().unique()
+            valores_b = datos_b[componente].dropna().unique()
+            
+            # Procesar valores para mostrar
+            valor_a = ", ".join([str(v) for v in valores_a]) if len(valores_a) > 0 else "No definido"
+            valor_b = ", ".join([str(v) for v in valores_b]) if len(valores_b) > 0 else "No definido"
+            
+            # Determinar si hay diferencia
+            diferentes = set(valores_a) != set(valores_b)
+            
+            # Si solo mostrar diferencias y son iguales, saltar
+            if solo_diferencias and not diferentes:
+                continue
+            
+            comparacion_data.append({
+                "Componente": componente,
+                f"Producto A ({producto_a})": valor_a,
+                f"Producto B ({producto_b})": valor_b,
+                "¿Diferente?": "✅ Sí" if diferentes else "❌ No"
+            })
+        
+        if comparacion_data:
+            df_comparacion = pd.DataFrame(comparacion_data)
+            
+            # Mostrar métricas de comparación
+            total_componentes = len(df_comparacion)
+            componentes_diferentes = len(df_comparacion[df_comparacion["¿Diferente?"] == "✅ Sí"])
+            porcentaje_diferencias = (componentes_diferentes / total_componentes * 100) if total_componentes > 0 else 0
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Componentes Analizados", total_componentes)
+            with col2:
+                st.metric("Componentes Diferentes", componentes_diferentes)
+            with col3:
+                st.metric("% Diferencias", f"{porcentaje_diferencias:.1f}%")
+            
+            # Aplicar estilo a la tabla
+            def resaltar_diferencias(row):
+                if row["¿Diferente?"] == "✅ Sí":
+                    return ['background-color: #ffebee'] * len(row)
+                else:
+                    return ['background-color: #f1f8e9'] * len(row)
+            
+            st.dataframe(
+                df_comparacion.style.apply(resaltar_diferencias, axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+        else:
+            if solo_diferencias:
+                st.success("✅ **¡No hay diferencias en el utilaje entre estos productos!**")
+            else:
+                st.info("ℹ️ No se encontraron componentes de utilaje para comparar.")
+                
+    except Exception as e:
+        st.error(f"Error comparando utilaje: {str(e)}")
+        logger.error(f"Error en comparar_utilaje_productos: {str(e)}")
+
+def mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles):
+    """Muestra estadísticas generales del utilaje."""
+    
+    try:
+        # Análisis de frecuencias por componente
+        st.markdown("#### 📈 Frecuencia de Valores por Componente")
+        
+        # Selector de componente para análisis detallado
+        componente_analisis = st.selectbox(
+            "Selecciona componente para análisis detallado:",
+            componentes_disponibles,
+            key="componente_analisis"
+        )
+        
+        if componente_analisis:
+            col_analisis, col_exportar = st.columns([3, 1])
+            
+            with col_analisis:
+                # Obtener frecuencias del componente seleccionado
+                valores_componente = df_ddp[componente_analisis].dropna()
+                
+                if not valores_componente.empty:
+                    frecuencias = valores_componente.value_counts().reset_index()
+                    frecuencias.columns = ["Valor", "Frecuencia"]
+                    frecuencias["Porcentaje"] = (frecuencias["Frecuencia"] / frecuencias["Frecuencia"].sum() * 100).round(1)
+                    
+                    st.dataframe(frecuencias, use_container_width=True, hide_index=True)
+                    
+                    # Mostrar métricas del componente
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Valores Únicos", len(frecuencias))
+                    with col2:
+                        st.metric("Productos con Valor", len(valores_componente))
+                    with col3:
+                        valor_mas_comun = frecuencias.iloc[0]["Valor"] if not frecuencias.empty else "N/A"
+                        st.metric("Valor Más Común", valor_mas_comun)
+                else:
+                    st.info(f"ℹ️ No hay valores definidos para {componente_analisis}")
+            
+            with col_exportar:
+                # Botón para exportar análisis completo
+                if st.button("📥 Exportar Análisis"):
+                    exportar_analisis_utilaje(df_ddp, componentes_disponibles)
+        
+        # Resumen general de todos los componentes
+        st.markdown("---")
+        st.markdown("#### 📋 Resumen General de Componentes")
+        
+        resumen_general = []
+        for componente in componentes_disponibles:
+            valores = df_ddp[componente].dropna()
+            valores_unicos = len(valores.unique()) if not valores.empty else 0
+            productos_con_valor = len(valores) if not valores.empty else 0
+            total_productos = len(df_ddp)
+            cobertura = (productos_con_valor / total_productos * 100) if total_productos > 0 else 0
+            
+            resumen_general.append({
+                "Componente": componente,
+                "Valores Únicos": valores_unicos,
+                "Productos con Valor": productos_con_valor,
+                "Cobertura (%)": f"{cobertura:.1f}%"
+            })
+        
+        df_resumen = pd.DataFrame(resumen_general)
+        
+        # Colorear por cobertura
+        def colorear_cobertura(row):
+            cobertura = float(row["Cobertura (%)"].replace("%", ""))
+            if cobertura >= 80:
+                return ['background-color: #d1edff'] * len(row)
+            elif cobertura >= 50:
+                return ['background-color: #fff3cd'] * len(row)
+            else:
+                return ['background-color: #f8d7da'] * len(row)
+        
+        st.dataframe(
+            df_resumen.style.apply(colorear_cobertura, axis=1),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+    except Exception as e:
+        st.error(f"Error en estadísticas de utilaje: {str(e)}")
+        logger.error(f"Error en mostrar_estadisticas_utilaje: {str(e)}")
+
+def exportar_analisis_utilaje(df_ddp, componentes_disponibles):
+    """Exporta el análisis completo de utilaje."""
+    
+    try:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            # Hoja 1: Resumen por componente
+            resumen_componentes = []
+            for componente in componentes_disponibles:
+                valores = df_ddp[componente].dropna()
+                frecuencias = valores.value_counts()
+                
+                for valor, freq in frecuencias.items():
+                    resumen_componentes.append({
+                        "Componente": componente,
+                        "Valor": valor,
+                        "Frecuencia": freq
+                    })
+            
+            if resumen_componentes:
+                df_resumen_comp = pd.DataFrame(resumen_componentes)
+                df_resumen_comp.to_excel(writer, sheet_name="Resumen_Componentes", index=False)
+            
+            # Hoja 2: Matriz completa de utilaje
+            columnas_utilaje = ["Producto"] + componentes_disponibles
+            df_utilaje_completo = df_ddp[columnas_utilaje]
+            df_utilaje_completo.to_excel(writer, sheet_name="Utilaje_Completo", index=False)
+            
+            # Hoja 3: Estadísticas generales
+            estadisticas = []
+            for componente in componentes_disponibles:
+                valores = df_ddp[componente].dropna()
+                estadisticas.append({
+                    "Componente": componente,
+                    "Valores_Unicos": len(valores.unique()) if not valores.empty else 0,
+                    "Productos_con_Valor": len(valores),
+                    "Cobertura_Porcentaje": len(valores) / len(df_ddp) * 100 if len(df_ddp) > 0 else 0
+                })
+            
+            df_estadisticas = pd.DataFrame(estadisticas)
+            df_estadisticas.to_excel(writer, sheet_name="Estadisticas", index=False)
+        
+        buffer.seek(0)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"Analisis_Utilaje_{timestamp}.xlsx"
+        
+        st.download_button(
+            label="📊 Descargar Análisis Completo",
+            data=buffer,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Incluye resumen por componentes, matriz completa y estadísticas"
+        )
+        
+        st.success("✅ Análisis exportado exitosamente")
+        
+    except Exception as e:
+        st.error(f"Error exportando análisis: {str(e)}")
+        logger.error(f"Error en exportar_analisis_utilaje: {str(e)}")
 
 if __name__ == "__main__":
     main()
