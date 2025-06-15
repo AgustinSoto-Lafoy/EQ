@@ -361,18 +361,24 @@ def mostrar_resumen_maestranza(df_ddp):
     )
     df_programa["Toneladas Programadas"] = df_programa["Toneladas Programadas"].astype(int)
 
-    # Obtener códigos de canal por producto
-    codigos_por_producto = (
-        df_ddp.groupby("Producto")["Código Canal"]
-        .unique()
-        .apply(lambda x: ", ".join(sorted([str(c) for c in x if pd.notna(c)])))
-        .reset_index()
-        .rename(columns={"Producto": "Nombre STD", "Código Canal": "Códigos Canal"})
+    # Seleccionar primeras ocurrencias por Producto y STD
+    posiciones_deseadas = ["M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6"]
+    df_canal_unico = (
+        df_ddp[df_ddp["STD"].isin(posiciones_deseadas)]
+        .dropna(subset=["Código Canal"])
+        .sort_values(["Producto", "STD"])
+        .drop_duplicates(subset=["Producto", "STD"], keep="first")
     )
 
-    # Unir programa con información técnica
-    df_resumen = df_programa.merge(codigos_por_producto, on="Nombre STD", how="left")
-    df_resumen = df_resumen[["Nombre STD", "Toneladas Programadas", "Códigos Canal"]]
+    # Pivotear para obtener una columna por posición
+    df_canal_pivot = df_canal_unico.pivot(index="Producto", columns="STD", values="Código Canal").reset_index()
+    df_canal_pivot.columns.name = None
+
+    # Unir con programa
+    df_resumen = df_programa.merge(df_canal_pivot, left_on="Nombre STD", right_on="Producto", how="left").drop(columns=["Producto"])
+
+    columnas_orden = ["Nombre STD", "Toneladas Programadas"] + posiciones_deseadas
+    df_resumen = df_resumen[[col for col in columnas_orden if col in df_resumen.columns]]
 
     st.dataframe(df_resumen, use_container_width=True)
 
@@ -393,7 +399,7 @@ def mostrar_resumen_maestranza(df_ddp):
         .reset_index()
         .sort_values("Toneladas_Programadas", ascending=False)
     )
-    st.dataframe(frecuencia_en_programa, use_container_width=True)
+    st.dataframe(frecuencia_en_programa.set_index("Código Canal"), use_container_width=True)
 
     # Botón de descarga (solo de la tabla principal)
     buffer = io.BytesIO()
