@@ -205,7 +205,7 @@ with tabs[2]:
         df_programa = (
             df_prog
             .groupby(["Grupo", "Nombre STD"], as_index=False)
-            .agg({"Toneladas Programadas": "sum"})
+            .agg({"PROGR.": "sum"})
         )
 
         # Traer códigos de canal por producto completo
