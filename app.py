@@ -232,7 +232,7 @@ def main():
     # =====================================
     
     with tabs[2]:
-        st.title("🏭 Resumen Técnico para Maestranza")
+        st.title("⛩ Resumen Técnico para Maestranza")
         
         if "df_prog" in st.session_state:
             mostrar_resumen_maestranza(df_ddp)
@@ -377,7 +377,7 @@ def mostrar_resumen_maestranza(df_ddp):
     st.dataframe(df_resumen, use_container_width=True)
 
     # Tabla adicional: Frecuencia real de cada código de canal según el programa
-    st.markdown("### 🔁 Frecuencia de Códigos de Canal en el Programa")
+    st.markdown("### 🔁 Frecuencia de Cilindros en Programa")
     df_resumen["Códigos Canal Lista"] = df_resumen["Códigos Canal"].apply(
         lambda x: x.split(", ") if isinstance(x, str) else []
     )
