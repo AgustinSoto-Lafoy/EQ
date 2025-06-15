@@ -346,12 +346,12 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
 
 def mostrar_resumen_maestranza(df_ddp):
     """Muestra el resumen técnico para maestranza."""
-    
+
     df_prog = st.session_state.df_prog.copy()
-    
+
     # Detectar bloques consecutivos del mismo producto
     df_prog["Grupo"] = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
-    
+
     # Sumar toneladas programadas por bloque consecutivo
     df_programa = (
         df_prog
@@ -359,7 +359,8 @@ def mostrar_resumen_maestranza(df_ddp):
         .agg({"PROGR": "sum"})
         .rename(columns={"PROGR": "Toneladas Programadas"})
     )
-    
+    df_programa["Toneladas Programadas"] = df_programa["Toneladas Programadas"].astype(int)
+
     # Obtener códigos de canal por producto
     codigos_por_producto = (
         df_ddp.groupby("Producto")["Código Canal"]
@@ -368,19 +369,33 @@ def mostrar_resumen_maestranza(df_ddp):
         .reset_index()
         .rename(columns={"Producto": "Nombre STD", "Código Canal": "Códigos Canal"})
     )
-    
+
     # Unir programa con información técnica
     df_resumen = df_programa.merge(codigos_por_producto, on="Nombre STD", how="left")
     df_resumen = df_resumen[["Nombre STD", "Toneladas Programadas", "Códigos Canal"]]
-    
+
     st.dataframe(df_resumen, use_container_width=True)
-    
-    # Botón de descarga
+
+    # Tabla adicional: Frecuencia real de cada código de canal según el programa
+    st.markdown("### 🔁 Frecuencia de Códigos de Canal en el Programa")
+    df_resumen["Códigos Canal Lista"] = df_resumen["Códigos Canal"].apply(
+        lambda x: x.split(", ") if isinstance(x, str) else []
+    )
+    codigos_expandidos = df_resumen.explode("Códigos Canal Lista")
+    frecuencia_en_programa = (
+        codigos_expandidos["Códigos Canal Lista"]
+        .value_counts()
+        .reset_index()
+        .rename(columns={"index": "Código Canal", "Códigos Canal Lista": "Frecuencia en Programa"})
+    )
+    st.dataframe(frecuencia_en_programa, use_container_width=True)
+
+    # Botón de descarga (solo de la tabla principal)
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         df_resumen.to_excel(writer, index=False, sheet_name="Resumen Maestranza")
     buffer.seek(0)
-    
+
     st.download_button(
         label="📥 Descargar Excel",
         data=buffer,
