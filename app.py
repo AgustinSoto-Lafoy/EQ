@@ -12,7 +12,17 @@ def cargar_datos():
 
 df_ddp, df_tiempo, df_desbaste = cargar_datos()
 
-tabs = st.tabs(["🆚 Comparador de Productos", "📋 Secuencia de Programa"])
+# --- CARGA GLOBAL DE PROGRAMA ---
+if "df_prog" not in st.session_state:
+    archivo_programa = st.file_uploader("📤 Sube el archivo de programa (xlsx)", type=["xlsx"], key="carga_global")
+    if archivo_programa is not None:
+        try:
+            df_prog = pd.read_excel(archivo_programa, sheet_name="TablaCombinada")
+            st.session_state.df_prog = df_prog[["Nombre STD"]].dropna().reset_index(drop=True)
+        except Exception as e:
+            st.error(f"❌ Error al cargar archivo: {e}")
+
+tabs = st.tabs(["🆚 Comparador de Productos", "📋 Secuencia de Programa", "🏭 Maestranza"])
 
 # --- PESTAÑA COMPARADOR MANUAL ---
 with tabs[0]:
@@ -84,40 +94,7 @@ with tabs[0]:
             resumen_ddp = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
         st.dataframe(resumen_ddp.style.apply(resaltar, axis=1))
 
-        resumen_desbaste = []
-        desbA = df_desbaste[df_desbaste["Familia"] == familiaA] if familiaA != "(Todos)" else df_desbaste
-        desbB = df_desbaste[df_desbaste["Familia"] == familiaB] if familiaB != "(Todos)" else df_desbaste
-
-        pares = sorted(set(zip(desbA["SubSTD"], desbA["Componente limpio"])) | set(zip(desbB["SubSTD"], desbB["Componente limpio"])), key=lambda x: int(x[0][1]) if x[0].startswith("D") and x[0][1:].isdigit() else 99)
-        for substd, comp in pares:
-            val1 = desbA[(desbA["SubSTD"] == substd) & (desbA["Componente limpio"] == comp)]["Valor"].values
-            val2 = desbB[(desbB["SubSTD"] == substd) & (desbB["Componente limpio"] == comp)]["Valor"].values
-            val1 = val1[0] if len(val1) > 0 else None
-            val2 = val2[0] if len(val2) > 0 else None
-            if (val1 is None or pd.isna(val1)) and (val2 is None or pd.isna(val2)):
-                continue
-            cambia = val1 != val2
-            resumen_desbaste.append({
-                "Posición": substd,
-                "Componente": comp,
-                "Valor A": val1,
-                "Valor B": val2,
-                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
-            })
-        df_desbaste_cmp = pd.DataFrame(resumen_desbaste)
-        st.markdown("### 🧠 Diagrama Desbaste")
-        if st.checkbox("Mostrar solo componentes que cambian (Desbaste)", value=False):
-            df_desbaste_cmp = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
-        st.dataframe(df_desbaste_cmp.astype(str).style.apply(resaltar, axis=1))
-
-        st.markdown("### 📊 Resumen de cambios")
-        resumen_contador = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
-        conteo_por_componente = resumen_contador["Componente"].value_counts().reset_index()
-        conteo_por_componente.columns = ["Componente", "Cantidad de Cambios"]
-        st.dataframe(conteo_por_componente)
-
-# --- PESTAÑA SECUENCIA DE PROGRAMA ---
-
+# --- FUNCIONES COMUNES ---
 def agrupar_cambios_consecutivos(df):
     columnas_clave = ["Producto Origen", "Producto Destino", "Familia"]
     df["Grupo"] = (df[columnas_clave] != df[columnas_clave].shift()).any(axis=1).cumsum()
@@ -133,58 +110,63 @@ def agrupar_cambios_consecutivos(df):
 
     return df_agrupado
 
+# --- PESTAÑA SECUENCIA DE PROGRAMA ---
 with tabs[1]:
     st.title("📋 Secuencia de Programa")
 
-    archivo = st.file_uploader("📤 Sube el archivo de programa (xlsx)", type=["xlsx"])
+    if "df_prog" in st.session_state:
+        df_prog = st.session_state.df_prog
 
-    if archivo is not None:
-        try:
-            df_prog = pd.read_excel(archivo, sheet_name="TablaCombinada")
-            df_prog = df_prog[["Nombre STD"]].dropna().reset_index(drop=True)
+        resumen = []
+        for i in range(len(df_prog) - 1):
+            origen = df_prog.loc[i, "Nombre STD"]
+            destino = df_prog.loc[i + 1, "Nombre STD"]
 
-            resumen = []
-            for i in range(len(df_prog) - 1):
-                origen = df_prog.loc[i, "Nombre STD"]
-                destino = df_prog.loc[i + 1, "Nombre STD"]
+            t = df_tiempo[(df_tiempo["Nombre STD Origen"] == origen) & (df_tiempo["Nombre STD Destino"] == destino)]["Minutos Cambio"].values
+            tiempo = t[0] if len(t) > 0 else None
 
-                t = df_tiempo[(df_tiempo["Nombre STD Origen"] == origen) & (df_tiempo["Nombre STD Destino"] == destino)]["Minutos Cambio"].values
-                tiempo = t[0] if len(t) > 0 else None
+            df_A = df_ddp[df_ddp["Producto"] == origen]
+            df_B = df_ddp[df_ddp["Producto"] == destino]
 
-                df_A = df_ddp[df_ddp["Producto"] == origen]
-                df_B = df_ddp[df_ddp["Producto"] == destino]
+            if not df_A.empty and not df_B.empty:
+                merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
+                cambios_codigo_canal = merged.apply(
+                    lambda row: row["Código Canal_A"] != row["Código Canal_B"]
+                    if "Código Canal_A" in row and "Código Canal_B" in row else False, axis=1
+                ).sum()
 
-                if not df_A.empty and not df_B.empty:
-                    merged = df_A.merge(df_B, on="STD", suffixes=("_A", "_B"))
-                    cambios_codigo_canal = merged.apply(
-                        lambda row: row["Código Canal_A"] != row["Código Canal_B"]
-                        if "Código Canal_A" in row and "Código Canal_B" in row else False, axis=1
-                    ).sum()
+                resumen.append({
+                    "Secuencia": i + 1,
+                    "Familia": f"{df_A['Familia'].values[0]}" + "-" + f"{df_B['Familia'].values[0]}",
+                    "Producto Origen": origen,
+                    "Producto Destino": destino,
+                    "Tiempo estimado": tiempo,
+                    "Cambios Código Canal": cambios_codigo_canal
+                })
 
-                    resumen.append({
-                        "Secuencia": i + 1,
-                        "Familia": f"{df_A['Familia'].values[0]}" + "-" + f"{df_B['Familia'].values[0]}",
-                        "Producto Origen": origen,
-                        "Producto Destino": destino,
-                        "Tiempo estimado": tiempo,
-                        "Cambios Código Canal": cambios_codigo_canal
-                    })
+        df_resumen = agrupar_cambios_consecutivos(pd.DataFrame(resumen))
 
-            df_resumen = agrupar_cambios_consecutivos(pd.DataFrame(resumen))
+        st.markdown("### Cambios en secuencia")
+        for idx, fila in df_resumen.iterrows():
+            tiempo_mostrar = "-" if pd.isna(fila['Tiempo estimado']) else f"{int(fila['Tiempo estimado'])} min"
+            titulo = f"🔹 #{fila['Secuencia']} | {fila['Producto Origen']} → {fila['Producto Destino']} | ⏱️ {tiempo_mostrar} | 🔧 {fila['Cambios Código Canal']} cambios canal"
 
-            st.markdown("### Cambios en secuencia")
-            for idx, fila in df_resumen.iterrows():
-                tiempo_mostrar = "-" if pd.isna(fila['Tiempo estimado']) else f"{int(fila['Tiempo estimado'])} min"
-                titulo = f"🔹 #{fila['Secuencia']} | {fila['Producto Origen']} → {fila['Producto Destino']} | ⏱️ {tiempo_mostrar} | 🔧 {fila['Cambios Código Canal']} cambios cilindro"
+            with st.expander(titulo):
+                df_A_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Origen']]
+                df_B_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Destino']]
+                columnas_cmp = [col for col in df_A_cmp.columns if col not in ["STD", "Producto", "Familia"]]
+                resumen_cmp = comparar_productos(df_A_cmp, df_B_cmp, columnas_cmp)
+                resumen_cmp = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
+                st.dataframe(resumen_cmp)
 
-                
-                with st.expander(titulo):
-                    df_A_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Origen']]
-                    df_B_cmp = df_ddp[df_ddp["Producto"] == fila['Producto Destino']]
-                    columnas_cmp = [col for col in df_A_cmp.columns if col not in ["STD", "Producto", "Familia"]]
-                    resumen_cmp = comparar_productos(df_A_cmp, df_B_cmp, columnas_cmp)
-                    resumen_cmp = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
-                    st.dataframe(resumen_cmp)
-
-        except Exception as e:
-            st.error(f"❌ Error al procesar el archivo: {e}")
+# --- PESTAÑA MAESTRANZA ---
+with tabs[2]:
+    st.title("🏭 Códigos de Canal por Producto en Programa")
+    if "df_prog" in st.session_state:
+        df_prog = st.session_state.df_prog
+        productos = df_prog["Nombre STD"].dropna().unique().tolist()
+        df_maestranza = df_ddp[df_ddp["Producto"].isin(productos)].copy()
+        df_maestranza = df_maestranza[["Producto", "STD", "Código Canal"]].sort_values(by=["Producto", "STD"])
+        st.dataframe(df_maestranza, use_container_width=True)
+    else:
+        st.warning("Por favor carga primero el archivo de programa en la parte superior.")
