@@ -119,18 +119,18 @@ with tabs[0]:
 # --- PESTAÑA SECUENCIA DE PROGRAMA ---
 
 def agrupar_cambios_consecutivos(df):
-    df["Grupo"] = (df[["Producto Origen", "Producto Destino", "Tiempo estimado", "Cambios Código Canal"]]
-                   .ne(df[["Producto Origen", "Producto Destino", "Tiempo estimado", "Cambios Código Canal"]].shift())
-                   .any(axis=1)
-                   .cumsum())
+    columnas_clave = ["Producto Origen", "Producto Destino", "Familia"]
+    df["Grupo"] = (df[columnas_clave] != df[columnas_clave].shift()).any(axis=1).cumsum()
+
     df_agrupado = df.groupby("Grupo").agg({
         "Secuencia": "first",
         "Familia": "first",
         "Producto Origen": "first",
-        "Producto Destino": "last",
+        "Producto Destino": "first",
         "Tiempo estimado": "first",
         "Cambios Código Canal": "first"
     }).reset_index(drop=True)
+
     return df_agrupado
 
 with tabs[1]:
