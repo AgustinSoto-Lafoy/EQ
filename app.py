@@ -372,7 +372,6 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         st.error("❌ El archivo DDP debe contener las columnas 'Familia' y 'Producto'")
         return
     
-    # Selección de familias con ancho uniforme
     familias = ["(Todos)"] + sorted(df_ddp["Familia"].dropna().unique())
     
     col_f1, col_f2, col_config = st.columns([2, 2, 1])
@@ -383,9 +382,6 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         familia_b = st.selectbox("🏷️ Familia B", familias, key="famB")
     with col_config:
         st.markdown("**Opciones:**")
-        solo_cambios = st.checkbox("Solo mostrar cambios", value=True)
-    
-    # Filtrar productos por familia
     try:
         if familia_a == "(Todos)":
             df_fam_a = df_ddp
@@ -404,7 +400,6 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         st.error(f"Error filtrando productos: {str(e)}")
         return
     
-    # Selección de productos con ancho uniforme
     col_a, col_b = st.columns([2, 2])
     
     with col_a:
@@ -432,10 +427,9 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         else:
             mostrar_comparacion_productos(
                 df_ddp, df_tiempo, df_desbaste, 
-                producto_a, producto_b, familia_a, familia_b, solo_cambios
             )
 
-def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, producto_b, familia_a, familia_b, solo_cambios=True):
+def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, producto_b, familia_a, familia_b=True):
     """Muestra la comparación detallada entre dos productos."""
     
     try:
@@ -463,7 +457,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         st.markdown("---")
         col_filtro, col_space = st.columns([1, 3])
         with col_filtro:
-            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=solo_cambios, key="filtro_tablas")
+            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=True, key="filtro_tablas")
         
         # Comparación técnica (DDP)
         st.markdown("### 🔢 Análisis Técnico")
