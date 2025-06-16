@@ -140,26 +140,48 @@ def comparar_productos(df_a, df_b, columnas):
     return pd.DataFrame(resumen)
 
 @st.cache_data
+@st.cache_data
 def comparar_desbaste(df_desbaste, familia_a, familia_b):
-    """Compara diagrama de desbaste entre dos familias - VERSIÓN SEGURA."""
+    """Compara diagrama de desbaste entre dos familias - VERSIÓN MEJORADA."""
     try:
+        # Si son la misma familia, no hay cambios
+        if familia_a == familia_b:
+            return pd.DataFrame()
+        
         # Filtrar por familias de forma segura
         if familia_a != "(Todos)":
-            desb_a = df_desbaste[df_desbaste["Familia"] == familia_a]
+            desb_a = df_desbaste[df_desbaste["Familia"] == familia_a].copy()
         else:
             desb_a = df_desbaste.copy()
             
         if familia_b != "(Todos)":
-            desb_b = df_desbaste[df_desbaste["Familia"] == familia_b]
+            desb_b = df_desbaste[df_desbaste["Familia"] == familia_b].copy()
         else:
             desb_b = df_desbaste.copy()
         
         # Verificar columnas necesarias
         columnas_requeridas = ["SubSTD", "Componente limpio", "Valor"]
         if not all(col in df_desbaste.columns for col in columnas_requeridas):
+            logger.error(f"Columnas faltantes en desbaste. Requeridas: {columnas_requeridas}")
             return pd.DataFrame()
         
-        # Obtener todos los pares únicos
+        # Limpiar valores para comparación consistente
+        def limpiar_valor(val):
+            if pd.isna(val) or val is None:
+                return None
+            # Convertir a string y limpiar espacios
+            val_str = str(val).strip()
+            # Intentar convertir a número si es posible
+            try:
+                return float(val_str)
+            except:
+                return val_str
+        
+        # Aplicar limpieza a los valores
+        desb_a["Valor_limpio"] = desb_a["Valor"].apply(limpiar_valor)
+        desb_b["Valor_limpio"] = desb_b["Valor"].apply(limpiar_valor)
+        
+        # Obtener todos los pares únicos (SubSTD, Componente)
         pares_a = set(zip(desb_a["SubSTD"], desb_a["Componente limpio"]))
         pares_b = set(zip(desb_b["SubSTD"], desb_b["Componente limpio"]))
         todos_pares = sorted(pares_a.union(pares_b))
@@ -170,28 +192,42 @@ def comparar_desbaste(df_desbaste, familia_a, familia_b):
             val_a_df = desb_a[(desb_a["SubSTD"] == substd) & (desb_a["Componente limpio"] == comp)]
             val_b_df = desb_b[(desb_b["SubSTD"] == substd) & (desb_b["Componente limpio"] == comp)]
             
-            val_a = val_a_df["Valor"].values[0] if not val_a_df.empty else None
-            val_b = val_b_df["Valor"].values[0] if not val_b_df.empty else None
+            # Obtener valores limpios
+            val_a_limpio = val_a_df["Valor_limpio"].iloc[0] if not val_a_df.empty else None
+            val_b_limpio = val_b_df["Valor_limpio"].iloc[0] if not val_b_df.empty else None
             
-            # Saltar valores vacíos
-            if (val_a is None or pd.isna(val_a)) and (val_b is None or pd.isna(val_b)):
+            # Obtener valores originales para mostrar
+            val_a_original = val_a_df["Valor"].iloc[0] if not val_a_df.empty else None
+            val_b_original = val_b_df["Valor"].iloc[0] if not val_b_df.empty else None
+            
+            # Si ambos son None, continuar
+            if val_a_limpio is None and val_b_limpio is None:
                 continue
             
-            # Comparación segura
-            try:
-                cambia = val_a != val_b
-            except:
-                cambia = str(val_a) != str(val_b)
+            # Determinar si hay cambio
+            if val_a_limpio is None or val_b_limpio is None:
+                # Si uno tiene valor y el otro no, es un cambio
+                cambia = True
+            else:
+                # Comparar valores limpios
+                cambia = val_a_limpio != val_b_limpio
                 
             resumen_desbaste.append({
                 "Posición": substd,
                 "Componente": comp,
-                "Valor A": val_a if not pd.isna(val_a) else "-",
-                "Valor B": val_b if not pd.isna(val_b) else "-",
+                "Valor A": str(val_a_original) if val_a_original is not None else "-",
+                "Valor B": str(val_b_original) if val_b_original is not None else "-",
                 "¿Cambia?": "✅ Sí" if cambia else "❌ No"
             })
         
-        return pd.DataFrame(resumen_desbaste)
+        df_resultado = pd.DataFrame(resumen_desbaste)
+        
+        # Log para debugging
+        if not df_resultado.empty:
+            cambios = len(df_resultado[df_resultado["¿Cambia?"] == "✅ Sí"])
+            logger.info(f"Comparación desbaste {familia_a} vs {familia_b}: {cambios} cambios de {len(df_resultado)} componentes")
+        
+        return df_resultado
         
     except Exception as e:
         logger.error(f"Error en comparar_desbaste: {str(e)}")
@@ -491,8 +527,15 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         st.markdown("---")
         st.markdown("### 🧠 Análisis de Diagrama Desbaste")
         
+        # Obtener las familias de los productos seleccionados
+        familia_real_a = df_a["Familia"].iloc[0] if not df_a.empty and "Familia" in df_a.columns else familia_a
+        familia_real_b = df_b["Familia"].iloc[0] if not df_b.empty and "Familia" in df_b.columns else familia_b
+        
+        # Log para debugging
+        logger.info(f"Comparando desbaste: Producto A '{producto_a}' (Familia {familia_real_a}) vs Producto B '{producto_b}' (Familia {familia_real_b})")
+        
         with st.spinner("Analizando diagrama de desbaste..."):
-            df_desbaste_cmp = comparar_desbaste(df_desbaste, familia_a, familia_b)
+            df_desbaste_cmp = comparar_desbaste(df_desbaste, familia_real_a, familia_real_b)
         
         if not df_desbaste_cmp.empty:
             mostrar_metricas_resumen(df_desbaste_cmp)
