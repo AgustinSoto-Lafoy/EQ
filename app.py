@@ -113,7 +113,7 @@ def comparar_productos(df_a, df_b, columnas):
         
         for col in columnas:
             # Verificar que la columna existe
-            if col not in df_a.columns and col not in df_b.columns:
+            if col not in df_a.columns or col not in df_b.columns:
                 continue
                 
             val_a = fila_a[col].values[0] if not fila_a.empty and col in fila_a.columns else None
@@ -126,7 +126,7 @@ def comparar_productos(df_a, df_b, columnas):
             # Comparación segura
             try:
                 cambia = val_a != val_b
-            except:
+            except (TypeError, ValueError):
                 cambia = str(val_a) != str(val_b)
             
             resumen.append({
@@ -375,15 +375,12 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     # Selección de familias con ancho uniforme
     familias = ["(Todos)"] + sorted(df_ddp["Familia"].dropna().unique())
     
-    col_f1, col_f2, col_config = st.columns([2, 2, 1])
+    col_f1, col_f2 = st.columns([2, 2])
     
     with col_f1:
         familia_a = st.selectbox("🏷️ Familia A", familias, key="famA")
     with col_f2:
         familia_b = st.selectbox("🏷️ Familia B", familias, key="famB")
-    with col_config:
-        st.markdown("**Opciones:**")
-        solo_cambios = st.checkbox("Solo mostrar cambios", value=True)
     
     # Filtrar productos por familia
     try:
@@ -432,12 +429,10 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
         else:
             mostrar_comparacion_productos(
                 df_ddp, df_tiempo, df_desbaste, 
-                producto_a, producto_b, familia_a, familia_b, solo_cambios
+                producto_a, producto_b, familia_a, familia_b
             )
 
-def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, producto_b, familia_a, familia_b, solo_cambios=True):
-    """Muestra la comparación detallada entre dos productos."""
-    
+def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, producto_b, familia_a, familia_b):
     try:
         df_a = df_ddp[df_ddp["Producto"] == producto_a]
         df_b = df_ddp[df_ddp["Producto"] == producto_b]
@@ -463,7 +458,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         st.markdown("---")
         col_filtro, col_space = st.columns([1, 3])
         with col_filtro:
-            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=solo_cambios, key="filtro_tablas")
+            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=True, key="filtro_tablas")
         
         # Comparación técnica (DDP)
         st.markdown("### 🔢 Análisis Técnico")
