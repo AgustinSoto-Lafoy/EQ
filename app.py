@@ -967,69 +967,394 @@ def mostrar_analisis_utilaje(df_ddp):
             st.error("❌ No se encontraron componentes de utilaje en los datos.")
             return
         
-        # Selector de productos para análisis individual
-        st.markdown("---")
-        st.markdown("### 🔍 Análisis Individual de Producto")
+        # Crear pestañas para diferentes análisis
+        sub_tabs = st.tabs([
+            "📊 Análisis según Programa",
+            "🔍 Análisis Individual", 
+            "🆚 Comparación Manual",
+            "📈 Estadísticas Generales"
+        ])
         
-        productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
-        
-        if productos_disponibles:
-            col_prod, col_filtro = st.columns([2, 1])
-            
-            with col_prod:
-                producto_seleccionado = st.selectbox(
-                    "Selecciona un producto para ver su utilaje:",
-                    productos_disponibles,
-                    key="producto_utilaje"
-                )
-            
-            with col_filtro:
-                st.markdown("**Opciones:**")
-                mostrar_solo_definidos = st.checkbox("Solo mostrar componentes definidos", value=True)
-            
-            if producto_seleccionado:
-                mostrar_utilaje_producto(df_ddp, producto_seleccionado, componentes_disponibles, mostrar_solo_definidos)
-        
-        # Análisis comparativo de productos
-        st.markdown("---")
-        st.markdown("### 🆚 Comparación de Utilaje entre Productos")
-        
-        if len(productos_disponibles) >= 2:
-            col_a, col_b, col_opciones = st.columns([2, 2, 1])
-            
-            with col_a:
-                producto_a_util = st.selectbox(
-                    "Producto A:",
-                    productos_disponibles,
-                    key="producto_a_utilaje"
-                )
-            
-            with col_b:
-                producto_b_util = st.selectbox(
-                    "Producto B:",
-                    productos_disponibles,
-                    index=1 if len(productos_disponibles) > 1 else 0,
-                    key="producto_b_utilaje"
-                )
-            
-            with col_opciones:
-                st.markdown("**Opciones:**")
-                solo_diferencias = st.checkbox("Solo diferencias", value=True, key="solo_dif_utilaje")
-            
-            if producto_a_util != producto_b_util:
-                comparar_utilaje_productos(df_ddp, producto_a_util, producto_b_util, componentes_disponibles, solo_diferencias)
+        # PESTAÑA 1: ANÁLISIS SEGÚN PROGRAMA
+        with sub_tabs[0]:
+            if "df_prog" in st.session_state:
+                mostrar_utilaje_programa(df_ddp, componentes_disponibles)
             else:
-                st.warning("⚠️ Selecciona productos diferentes para compararlos.")
+                st.info("📤 Por favor carga primero el archivo de programa para ver el análisis de utilaje según la secuencia de producción.")
         
-        # Análisis general de utilaje
-        st.markdown("---")
-        st.markdown("### 📊 Análisis General de Utilaje")
+        # PESTAÑA 2: ANÁLISIS INDIVIDUAL
+        with sub_tabs[1]:
+            st.markdown("### 🔍 Análisis Individual de Producto")
+            
+            productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
+            
+            if productos_disponibles:
+                col_prod, col_filtro = st.columns([2, 1])
+                
+                with col_prod:
+                    producto_seleccionado = st.selectbox(
+                        "Selecciona un producto para ver su utilaje:",
+                        productos_disponibles,
+                        key="producto_utilaje_individual"
+                    )
+                
+                with col_filtro:
+                    st.markdown("**Opciones:**")
+                    mostrar_solo_definidos = st.checkbox("Solo mostrar componentes definidos", value=True, key="filtro_individual")
+                
+                if producto_seleccionado:
+                    mostrar_utilaje_producto(df_ddp, producto_seleccionado, componentes_disponibles, mostrar_solo_definidos)
         
-        mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles)
+        # PESTAÑA 3: COMPARACIÓN MANUAL
+        with sub_tabs[2]:
+            st.markdown("### 🆚 Comparación de Utilaje entre Productos")
+            
+            productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
+            
+            if len(productos_disponibles) >= 2:
+                col_a, col_b, col_opciones = st.columns([2, 2, 1])
+                
+                with col_a:
+                    producto_a_util = st.selectbox(
+                        "Producto A:",
+                        productos_disponibles,
+                        key="producto_a_utilaje_comp"
+                    )
+                
+                with col_b:
+                    producto_b_util = st.selectbox(
+                        "Producto B:",
+                        productos_disponibles,
+                        index=1 if len(productos_disponibles) > 1 else 0,
+                        key="producto_b_utilaje_comp"
+                    )
+                
+                with col_opciones:
+                    st.markdown("**Opciones:**")
+                    solo_diferencias = st.checkbox("Solo diferencias", value=True, key="solo_dif_utilaje_comp")
+                
+                if producto_a_util != producto_b_util:
+                    comparar_utilaje_productos(df_ddp, producto_a_util, producto_b_util, componentes_disponibles, solo_diferencias)
+                else:
+                    st.warning("⚠️ Selecciona productos diferentes para compararlos.")
+            else:
+                st.warning("⚠️ Se necesitan al menos 2 productos para comparar.")
+        
+        # PESTAÑA 4: ESTADÍSTICAS GENERALES
+        with sub_tabs[3]:
+            st.markdown("### 📊 Análisis General de Utilaje")
+            mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles)
         
     except Exception as e:
         st.error(f"Error en análisis de utilaje: {str(e)}")
         logger.error(f"Error en mostrar_analisis_utilaje: {str(e)}")
+
+def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
+    """Muestra el análisis de utilaje basado en el programa de producción."""
+    
+    try:
+        df_prog = st.session_state.df_prog.copy()
+        
+        st.markdown("### 📋 Análisis de Utilaje según Secuencia de Producción")
+        
+        with st.spinner("Analizando necesidades de utilaje según programa..."):
+            # Detectar bloques consecutivos del mismo producto
+            df_prog["Grupo"] = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
+            
+            # Verificar que existe la columna PROGR para toneladas
+            if "PROGR" not in df_prog.columns:
+                st.error("❌ El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
+                return
+            
+            # Agrupar y sumar toneladas
+            df_programa = (
+                df_prog
+                .groupby(["Grupo", "Nombre STD"], as_index=False)
+                .agg({"PROGR": "sum"})
+                .rename(columns={"PROGR": "Toneladas"})
+            )
+            df_programa["Toneladas"] = df_programa["Toneladas"].astype(int)
+            
+            # Análisis de cambios de utilaje en la secuencia
+            cambios_utilaje = []
+            
+            for i in range(len(df_programa) - 1):
+                producto_actual = df_programa.loc[i, "Nombre STD"]
+                producto_siguiente = df_programa.loc[i + 1, "Nombre STD"]
+                
+                # Skip si es el mismo producto
+                if producto_actual == producto_siguiente:
+                    continue
+                
+                # Obtener datos de utilaje para ambos productos
+                datos_actual = df_ddp[df_ddp["Producto"] == producto_actual]
+                datos_siguiente = df_ddp[df_ddp["Producto"] == producto_siguiente]
+                
+                if datos_actual.empty or datos_siguiente.empty:
+                    continue
+                
+                # Analizar cambios en cada componente
+                componentes_cambian = []
+                for comp in componentes_disponibles:
+                    val_actual = datos_actual[comp].dropna().unique()
+                    val_siguiente = datos_siguiente[comp].dropna().unique()
+                    
+                    # Determinar si hay cambio
+                    if len(val_actual) > 0 and len(val_siguiente) > 0:
+                        if set(val_actual) != set(val_siguiente):
+                            componentes_cambian.append(comp)
+                
+                if componentes_cambian:
+                    cambios_utilaje.append({
+                        "Secuencia": i + 1,
+                        "Producto Origen": producto_actual,
+                        "Producto Destino": producto_siguiente,
+                        "Componentes que Cambian": len(componentes_cambian),
+                        "Detalle Componentes": ", ".join(componentes_cambian[:3]) + ("..." if len(componentes_cambian) > 3 else "")
+                    })
+        
+        # Mostrar métricas generales
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Productos", len(df_programa))
+        with col2:
+            st.metric("Cambios de Producto", len(cambios_utilaje))
+        with col3:
+            cambios_con_utilaje = len([c for c in cambios_utilaje if c["Componentes que Cambian"] > 0])
+            st.metric("Cambios con Utilaje", cambios_con_utilaje)
+        with col4:
+            total_toneladas = df_programa["Toneladas"].sum()
+            st.metric("Total Toneladas", f"{total_toneladas:,.0f}")
+        
+        # Mostrar tabla de cambios de utilaje
+        if cambios_utilaje:
+            st.markdown("---")
+            st.markdown("#### 🔄 Cambios de Utilaje en la Secuencia")
+            
+            df_cambios = pd.DataFrame(cambios_utilaje)
+            
+            # Aplicar color según cantidad de cambios
+            def colorear_cambios(row):
+                cambios = row["Componentes que Cambian"]
+                if cambios >= 10:
+                    return ['background-color: #ffcdd2'] * len(row)  # Rojo claro
+                elif cambios >= 5:
+                    return ['background-color: #fff9c4'] * len(row)  # Amarillo claro
+                else:
+                    return ['background-color: #c8e6c9'] * len(row)  # Verde claro
+            
+            st.dataframe(
+                df_cambios.style.apply(colorear_cambios, axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Leyenda de colores
+            with st.expander("📋 Leyenda de colores"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.markdown("🟢 **Verde:** 1-4 componentes cambian")
+                with col2:
+                    st.markdown("🟡 **Amarillo:** 5-9 componentes cambian")
+                with col3:
+                    st.markdown("🔴 **Rojo:** 10+ componentes cambian")
+        
+        # Análisis de frecuencia de utilajes en el programa
+        st.markdown("---")
+        st.markdown("#### 🔁 Frecuencia de Utilajes en Programa")
+        
+        # Recopilar todos los utilajes usados en el programa
+        utilajes_programa = {}
+        
+        for componente in componentes_disponibles:
+            utilajes_programa[componente] = []
+            
+            for _, row in df_programa.iterrows():
+                producto = row["Nombre STD"]
+                toneladas = row["Toneladas"]
+                
+                # Obtener valores de utilaje para este producto
+                datos_producto = df_ddp[df_ddp["Producto"] == producto]
+                if not datos_producto.empty:
+                    valores = datos_producto[componente].dropna().unique()
+                    for valor in valores:
+                        utilajes_programa[componente].append({
+                            "Valor": valor,
+                            "Producto": producto,
+                            "Toneladas": toneladas
+                        })
+        
+        # Selector de componente para análisis detallado
+        componente_analizar = st.selectbox(
+            "Selecciona componente para ver frecuencia:",
+            componentes_disponibles,
+            key="comp_frecuencia_programa"
+        )
+        
+        if componente_analizar and utilajes_programa[componente_analizar]:
+            df_comp = pd.DataFrame(utilajes_programa[componente_analizar])
+            
+            # Agrupar por valor y sumar toneladas
+            frecuencia_comp = (
+                df_comp
+                .groupby("Valor")
+                .agg(
+                    Frecuencia=("Producto", "count"),
+                    Toneladas_Total=("Toneladas", "sum"),
+                    Productos=("Producto", lambda x: ", ".join(x.unique()[:3]) + ("..." if len(x.unique()) > 3 else ""))
+                )
+                .reset_index()
+                .sort_values("Toneladas_Total", ascending=False)
+            )
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.dataframe(frecuencia_comp, use_container_width=True, hide_index=True)
+            
+            with col2:
+                # Métricas del componente
+                st.metric("Valores Únicos", len(frecuencia_comp))
+                if not frecuencia_comp.empty:
+                    valor_mas_usado = frecuencia_comp.iloc[0]["Valor"]
+                    st.metric("Más Usado", valor_mas_usado)
+        
+        # Resumen de necesidades de utilaje
+        st.markdown("---")
+        st.markdown("#### 📦 Resumen de Necesidades de Utilaje")
+        
+        # Crear tabla resumen con todos los productos y sus utilajes
+        resumen_utilaje = []
+        
+        for _, row in df_programa.iterrows():
+            producto = row["Nombre STD"]
+            toneladas = row["Toneladas"]
+            
+            datos_producto = df_ddp[df_ddp["Producto"] == producto]
+            if not datos_producto.empty:
+                fila_resumen = {
+                    "Producto": producto,
+                    "Toneladas": toneladas
+                }
+                
+                # Agregar valores de cada componente
+                for comp in componentes_disponibles[:6]:  # Mostrar solo los primeros 6 para no hacer la tabla muy ancha
+                    valores = datos_producto[comp].dropna().unique()
+                    fila_resumen[comp] = ", ".join([str(v) for v in valores]) if len(valores) > 0 else "-"
+                
+                resumen_utilaje.append(fila_resumen)
+        
+        if resumen_utilaje:
+            df_resumen_utilaje = pd.DataFrame(resumen_utilaje)
+            st.dataframe(df_resumen_utilaje, use_container_width=True, hide_index=True)
+        
+        # Botón de exportación
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            if st.button("📥 Exportar Análisis de Utilaje", key="export_utilaje_programa"):
+                exportar_utilaje_programa(df_programa, df_ddp, componentes_disponibles, cambios_utilaje)
+        
+    except Exception as e:
+        st.error(f"Error en análisis de utilaje según programa: {str(e)}")
+        logger.error(f"Error en mostrar_utilaje_programa: {str(e)}")
+
+def exportar_utilaje_programa(df_programa, df_ddp, componentes_disponibles, cambios_utilaje):
+    """Exporta el análisis de utilaje según programa."""
+    
+    try:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            # Hoja 1: Resumen del programa con utilajes principales
+            resumen_export = []
+            for _, row in df_programa.iterrows():
+                producto = row["Nombre STD"]
+                toneladas = row["Toneladas"]
+                
+                datos_producto = df_ddp[df_ddp["Producto"] == producto]
+                if not datos_producto.empty:
+                    fila = {"Producto": producto, "Toneladas": toneladas}
+                    
+                    for comp in componentes_disponibles:
+                        valores = datos_producto[comp].dropna().unique()
+                        fila[comp] = ", ".join([str(v) for v in valores]) if len(valores) > 0 else ""
+                    
+                    resumen_export.append(fila)
+            
+            if resumen_export:
+                df_resumen = pd.DataFrame(resumen_export)
+                df_resumen.to_excel(writer, sheet_name="Resumen_Utilaje_Programa", index=False)
+            
+            # Hoja 2: Cambios de utilaje
+            if cambios_utilaje:
+                df_cambios = pd.DataFrame(cambios_utilaje)
+                df_cambios.to_excel(writer, sheet_name="Cambios_Utilaje", index=False)
+            
+            # Hoja 3: Frecuencia de cada componente
+            for i, comp in enumerate(componentes_disponibles[:10]):  # Limitar a 10 componentes
+                frecuencias = {}
+                
+                for _, row in df_programa.iterrows():
+                    producto = row["Nombre STD"]
+                    toneladas = row["Toneladas"]
+                    
+                    datos_producto = df_ddp[df_ddp["Producto"] == producto]
+                    if not datos_producto.empty:
+                        valores = datos_producto[comp].dropna().unique()
+                        for valor in valores:
+                            if valor not in frecuencias:
+                                frecuencias[valor] = {"Frecuencia": 0, "Toneladas": 0, "Productos": []}
+                            frecuencias[valor]["Frecuencia"] += 1
+                            frecuencias[valor]["Toneladas"] += toneladas
+                            frecuencias[valor]["Productos"].append(producto)
+                
+                if frecuencias:
+                    df_freq = pd.DataFrame([
+                        {
+                            "Valor": k,
+                            "Frecuencia": v["Frecuencia"],
+                            "Toneladas": v["Toneladas"],
+                            "Productos": ", ".join(v["Productos"][:5]) + ("..." if len(v["Productos"]) > 5 else "")
+                        }
+                        for k, v in frecuencias.items()
+                    ]).sort_values("Toneladas", ascending=False)
+                    
+                    sheet_name = f"Frec_{comp[:20]}" if i < 9 else "Frec_Otros"  # Limitar nombre de hoja
+                    df_freq.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            # Formatear hojas
+            workbook = writer.book
+            header_format = workbook.add_format({
+                'bold': True,
+                'bg_color': '#4CAF50',
+                'font_color': 'white',
+                'border': 1
+            })
+            
+            for sheet_name in writer.sheets:
+                worksheet = writer.sheets[sheet_name]
+                worksheet.set_row(0, 20, header_format)
+                worksheet.autofit()
+        
+        buffer.seek(0)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"Analisis_Utilaje_Programa_{timestamp}.xlsx"
+        
+        st.download_button(
+            label="📊 Descargar Análisis Completo",
+            data=buffer,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Incluye resumen de utilaje por programa, cambios y frecuencias"
+        )
+        
+        st.success("✅ Análisis exportado exitosamente")
+        
+    except Exception as e:
+        st.error(f"Error exportando análisis: {str(e)}")
+        logger.error(f"Error en exportar_utilaje_programa: {str(e)}")
 
 def mostrar_utilaje_producto(df_ddp, producto, componentes_disponibles, mostrar_solo_definidos=True):
     """Muestra el detalle de utilaje para un producto específico."""
