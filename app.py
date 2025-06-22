@@ -140,9 +140,8 @@ def comparar_productos(df_a, df_b, columnas):
     return pd.DataFrame(resumen)
 
 @st.cache_data
-@st.cache_data
 def comparar_desbaste(df_desbaste, familia_a, familia_b):
-    """Compara diagrama de desbaste entre dos familias - VERSIÓN MEJORADA."""
+    """Compara diagrama de desbaste entre dos familias"""
     try:
         # Si son la misma familia, no hay cambios
         if familia_a == familia_b:
@@ -251,7 +250,7 @@ def obtener_tiempo_cambio(df_tiempo, producto_origen, producto_destino):
         return None
 
 def agrupar_cambios_consecutivos(df):
-    """Agrupa cambios consecutivos del mismo tipo - VERSIÓN SEGURA."""
+    """Agrupa cambios consecutivos del mismo tipo"""
     if df.empty:
         return df
     
@@ -341,7 +340,7 @@ def main():
     
     # Header
     st.markdown("""
-    # 🔧 Plataforma de Cambio de Producto – Laminador
+    # Plataforma de Cambio de Producto – Laminador Renca
     *Sistema de análisis y comparación de productos para optimización de cambios*
     """)
     
@@ -368,20 +367,20 @@ def main():
     
     # Pestañas principales
     tabs = st.tabs([
-        "🔍 Comparador Manual", 
-        "📋 Análisis de Secuencia", 
-        "🏭 Resumen Maestranza",
-        "🔧 Utilaje"
+        "Comparador Manual", 
+        "Análisis de Secuencia", 
+        "Resumen Maestranza",
+        "Utilaje"
     ])
     
     # PESTAÑA 1: COMPARADOR MANUAL
     with tabs[0]:
-        st.subheader("🔄 Comparación Manual de Productos")
+        st.subheader("Comparación Manual de Productos")
         mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste)
     
     # PESTAÑA 2: SECUENCIA DE PROGRAMA
     with tabs[1]:
-        st.subheader("📊 Análisis de Secuencia de Programa")
+        st.subheader("Análisis de Secuencia de Programa")
         if "df_prog" in st.session_state:
             mostrar_secuencia_programa(df_ddp, df_tiempo)
         else:
@@ -389,7 +388,7 @@ def main():
     
     # PESTAÑA 3: MAESTRANZA
     with tabs[2]:
-        st.subheader("📈 Resumen Técnico para Maestranza")
+        st.subheader("Resumen Técnico para Maestranza")
         if "df_prog" in st.session_state:
             mostrar_resumen_maestranza(df_ddp)
         else:
@@ -397,7 +396,7 @@ def main():
 
     # PESTAÑA 4: UTILAJE
     with tabs[3]:
-        st.subheader("🔧 Análisis de Utilaje")
+        st.subheader("Análisis de Utilaje")
         mostrar_analisis_utilaje(df_ddp)
 
 def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
@@ -414,9 +413,9 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     col_f1, col_f2 = st.columns([2, 2])
     
     with col_f1:
-        familia_a = st.selectbox("🏷️ Familia A", familias, key="famA")
+        familia_a = st.selectbox("Familia A", familias, key="famA")
     with col_f2:
-        familia_b = st.selectbox("🏷️ Familia B", familias, key="famB")
+        familia_b = st.selectbox("Familia B", familias, key="famB")
     
     # Filtrar productos por familia
     try:
@@ -442,7 +441,7 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     
     with col_a:
         if productos_a:
-            producto_a = st.selectbox("🔧 Producto A", productos_a, key="A")
+            producto_a = st.selectbox("Producto A", productos_a, key="A")
             if familia_a == "(Todos)":
                 mostrar_info_familia(producto_a, df_ddp, "Producto A")
         else:
@@ -451,7 +450,7 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     
     with col_b:
         if productos_b:
-            producto_b = st.selectbox("🔧 Producto B", productos_b, key="B")
+            producto_b = st.selectbox("Producto B", productos_b, key="B")
             if familia_b == "(Todos)":
                 mostrar_info_familia(producto_b, df_ddp, "Producto B")
         else:
@@ -494,10 +493,10 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         st.markdown("---")
         col_filtro, col_space = st.columns([1, 3])
         with col_filtro:
-            mostrar_solo_cambios = st.checkbox("📊 Solo mostrar cambios", value=True, key="filtro_tablas")
+            mostrar_solo_cambios = st.checkbox("Solo mostrar cambios", value=True, key="filtro_tablas")
         
         # Comparación técnica (DDP)
-        st.markdown("### 🔢 Análisis Técnico")
+        st.markdown("### Análisis Técnico")
         
         columnas_ddp = [col for col in df_a.columns if col not in ["STD", "Producto", "Familia"]]
         
@@ -525,7 +524,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         
         # Comparación desbaste
         st.markdown("---")
-        st.markdown("### 🧠 Análisis de Diagrama Desbaste")
+        st.markdown("### Análisis de Diagrama Desbaste")
         
         # Obtener las familias de los productos seleccionados
         familia_real_a = df_a["Familia"].iloc[0] if not df_a.empty and "Familia" in df_a.columns else familia_a
@@ -639,7 +638,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
         
         # Mostrar cambios detallados
         st.markdown("---")
-        st.markdown("### 🔄 Detalle de Cambios en Secuencia")
+        st.markdown("### Detalle de Cambios en Secuencia")
         
         for idx, fila in df_resumen.iterrows():
             try:
@@ -661,7 +660,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 origen = fila.get('Producto Origen', 'N/A')
                 destino = fila.get('Producto Destino', 'N/A')
                 
-                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | 🔧 {cambios_canal} cambios canal"
+                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | {cambios_canal} cambios canal"
                 
                 with st.expander(titulo):
                     df_a_cmp = df_ddp[df_ddp["Producto"] == origen]
@@ -772,7 +771,7 @@ def mostrar_resumen_maestranza(df_ddp):
             logger.error(f"Error calculando métricas maestranza: {str(e)}")
         
         # Tabla principal
-        st.markdown("### 📋 Resumen Detallado por Producto")
+        st.markdown("### Resumen Detallado por Producto")
         st.dataframe(df_resumen, use_container_width=True)
         
         # ===============================================
@@ -884,7 +883,7 @@ def mostrar_resumen_maestranza(df_ddp):
                 filename = f"Resumen_Maestranza_{timestamp}.xlsx"
                 
                 st.download_button(
-                    label="📊 Descargar Resumen Técnico Completo",
+                    label="Descargar Resumen Técnico Completo",
                     data=buffer_completo,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -893,26 +892,6 @@ def mostrar_resumen_maestranza(df_ddp):
             except Exception as e:
                 logger.error(f"Error creando Excel completo: {str(e)}")
                 st.error("Error generando archivo Excel completo")
-        
-        with col2:
-            # CSV del resumen principal
-            try:
-                csv_buffer = io.StringIO()
-                df_resumen.to_csv(csv_buffer, index=False, encoding='utf-8')
-                csv_data = csv_buffer.getvalue().encode('utf-8')
-                
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                
-                st.download_button(
-                    label="📄 Descargar CSV Resumen",
-                    data=csv_data,
-                    file_name=f"resumen_maestranza_{timestamp}.csv",
-                    mime="text/csv",
-                    help="Solo el resumen principal en formato CSV"
-                )
-            except Exception as e:
-                logger.error(f"Error creando CSV: {str(e)}")
-                st.error("Error generando archivo CSV")
         
     except Exception as e:
         st.error(f"Error generando resumen maestranza: {str(e)}")
@@ -969,10 +948,10 @@ def mostrar_analisis_utilaje(df_ddp):
         
         # Crear pestañas para diferentes análisis
         sub_tabs = st.tabs([
-            "📊 Análisis según Programa",
-            "🔍 Análisis Individual", 
-            "🆚 Comparación Manual",
-            "📈 Estadísticas Generales"
+            "Análisis según Programa",
+            "Análisis Individual", 
+            "Comparación Manual",
+            "Estadísticas Generales"
         ])
         
         # PESTAÑA 1: ANÁLISIS SEGÚN PROGRAMA
@@ -1007,7 +986,7 @@ def mostrar_analisis_utilaje(df_ddp):
         
         # PESTAÑA 3: COMPARACIÓN MANUAL
         with sub_tabs[2]:
-            st.markdown("### 🆚 Comparación de Utilaje entre Productos")
+            st.markdown("### Comparación de Utilaje entre Productos")
             
             productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
             
@@ -1042,7 +1021,7 @@ def mostrar_analisis_utilaje(df_ddp):
         
         # PESTAÑA 4: ESTADÍSTICAS GENERALES
         with sub_tabs[3]:
-            st.markdown("### 📊 Análisis General de Utilaje")
+            st.markdown("### Análisis General de Utilaje")
             mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles)
         
     except Exception as e:
@@ -1055,7 +1034,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
     try:
         df_prog = st.session_state.df_prog.copy()
         
-        st.markdown("### 📋 Análisis de Utilaje según Secuencia de Producción")
+        st.markdown("### Análisis de Utilaje según Secuencia de Producción")
         
         with st.spinner("Analizando necesidades de utilaje según programa..."):
             # Detectar bloques consecutivos del mismo producto
@@ -1129,7 +1108,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
         # Mostrar tabla de cambios de utilaje
         if cambios_utilaje:
             st.markdown("---")
-            st.markdown("#### 🔄 Cambios de Utilaje en la Secuencia")
+            st.markdown("#### Cambios de Utilaje en la Secuencia")
             
             df_cambios = pd.DataFrame(cambios_utilaje)
             
@@ -1161,7 +1140,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
         
         # Análisis de frecuencia de utilajes en el programa
         st.markdown("---")
-        st.markdown("#### 🔁 Frecuencia de Utilajes en Programa")
+        st.markdown("#### Frecuencia de Utilajes en Programa")
         
         # Recopilar todos los utilajes usados en el programa
         utilajes_programa = {}
@@ -1221,7 +1200,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
         
         # Resumen de necesidades de utilaje
         st.markdown("---")
-        st.markdown("#### 📦 Resumen de Necesidades de Utilaje")
+        st.markdown("#### Resumen de Necesidades de Utilaje")
         
         # Crear tabla resumen con todos los productos y sus utilajes
         resumen_utilaje = []
@@ -1343,7 +1322,7 @@ def exportar_utilaje_programa(df_programa, df_ddp, componentes_disponibles, camb
         filename = f"Analisis_Utilaje_Programa_{timestamp}.xlsx"
         
         st.download_button(
-            label="📊 Descargar Análisis Completo",
+            label="Descargar Análisis Completo",
             data=buffer,
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1507,7 +1486,7 @@ def mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles):
     
     try:
         # Análisis de frecuencias por componente
-        st.markdown("#### 📈 Frecuencia de Valores por Componente")
+        st.markdown("####Frecuencia de Valores por Componente")
         
         # Selector de componente para análisis detallado
         componente_analisis = st.selectbox(
@@ -1636,7 +1615,7 @@ def exportar_analisis_utilaje(df_ddp, componentes_disponibles):
         filename = f"Analisis_Utilaje_{timestamp}.xlsx"
         
         st.download_button(
-            label="📊 Descargar Análisis Completo",
+            label="Descargar Análisis Completo",
             data=buffer,
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
