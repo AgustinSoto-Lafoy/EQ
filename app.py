@@ -555,6 +555,36 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                 )
         else:
             st.info("ℹ️ No se encontraron datos de desbaste para comparar.")
+        
+        # ===============================
+        # NUEVO RESUMEN: Cambios por Componente
+        # ===============================
+        st.markdown("---")
+        st.markdown("### 📊 Resumen de Cambios por Componente")
+
+        resumen_total = pd.DataFrame()
+
+        if not resumen_ddp.empty:
+            resumen_total = pd.concat([resumen_total, resumen_ddp], ignore_index=True)
+        if not df_desbaste_cmp.empty:
+            resumen_total = pd.concat([resumen_total, df_desbaste_cmp], ignore_index=True)
+
+        if not resumen_total.empty and "¿Cambia?" in resumen_total.columns:
+            resumen_componentes = (
+                resumen_total[resumen_total["¿Cambia?"] == "✅ Sí"]
+                .groupby("Componente")
+                .size()
+                .reset_index(name="Cantidad de Cambios")
+                .sort_values("Cantidad de Cambios", ascending=False)
+            )
+
+            if not resumen_componentes.empty:
+                st.dataframe(resumen_componentes, use_container_width=True, hide_index=True)
+            else:
+                st.success("✅ No se registraron cambios en ningún componente.")
+        else:
+            st.info("ℹ️ No se encontraron diferencias para construir el resumen de componentes.")
+
             
     except Exception as e:
         st.error(f"Error en la comparación: {str(e)}")
