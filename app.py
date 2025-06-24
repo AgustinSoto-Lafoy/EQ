@@ -778,7 +778,7 @@ def mostrar_resumen_maestranza(df_ddp):
         # SECCIÓN DE FRECUENCIA DE CILINDROS
         # ===============================================
         
-        st.markdown("### 🔁 Frecuencia de Cilindros en Programa")
+        st.markdown("### Frecuencia de Cilindros en Programa")
         
         try:
             # Crear una lista con todos los códigos de canal para cada producto en el programa
