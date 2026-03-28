@@ -58,40 +58,113 @@ def cargar_datos():
     
     return datos.get("ddp"), datos.get("tiempo"), datos.get("desbaste")
 
+def _cruzar_programa_con_mapa(archivo_bytes):
+    """
+    Lee el programa (.xlsm o .xlsx) y genera el DataFrame equivalente a TablaCombinada
+    haciendo el cruce interno con la hoja 'Mapa'.
+
+    Returns (df_resultado, warnings_list) o lanza Exception si falla algo crítico.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(archivo_bytes, read_only=True, keep_vba=True, data_only=True)
+
+    # --- Validar hojas requeridas ---
+    hojas_requeridas = ["Prog LAM REN", "Mapa"]
+    for hoja in hojas_requeridas:
+        if hoja not in wb.sheetnames:
+            raise ValueError(
+                f"El archivo no contiene la hoja requerida '{hoja}'. "
+                f"Hojas disponibles: {wb.sheetnames}"
+            )
+
+    # --- Leer Mapa ---
+    ws_mapa = wb["Mapa"]
+    mapa_rows = list(ws_mapa.iter_rows(min_row=2, values_only=True))
+    df_mapa = pd.DataFrame(
+        mapa_rows,
+        columns=["Producto Limpio", "Nombre STD", "Producto STD", "Es Prueba"]
+    ).dropna(subset=["Producto Limpio"])
+    df_mapa["_key"] = df_mapa["Producto Limpio"].astype(str).str.strip()
+
+    # --- Leer Prog LAM REN (encabezado en fila 8, datos desde fila 9) ---
+    ws_prog = wb["Prog LAM REN"]
+    all_rows = list(ws_prog.iter_rows(min_row=8, values_only=True))
+    if not all_rows:
+        raise ValueError("La hoja 'Prog LAM REN' no tiene datos.")
+
+    headers = list(all_rows[0])
+    # Renombrar PROGR. → PROGR para consistencia con el resto de la app
+    headers = ["PROGR" if str(h) == "PROGR." else h for h in headers]
+
+    data_rows = all_rows[1:]
+    df_prog = pd.DataFrame(data_rows, columns=headers)
+
+    # Filtrar solo filas con CLASIFICADA numérico (filas reales de producción)
+    df_prog = df_prog[pd.to_numeric(df_prog["CLASIFICADA"], errors="coerce").notna()].copy()
+    df_prog.reset_index(drop=True, inplace=True)
+
+    if df_prog.empty:
+        raise ValueError("No se encontraron filas de producción en 'Prog LAM REN'.")
+
+    # --- Cruce ---
+    df_prog["_key"] = df_prog["DESCRIPCIÓN"].astype(str).str.strip()
+    df_merged = df_prog.merge(
+        df_mapa[["_key", "Nombre STD", "Producto STD", "Es Prueba"]].rename(
+            columns={"Es Prueba": "Tabla13.Es Prueba"}
+        ),
+        on="_key",
+        how="left"
+    ).drop(columns=["_key"])
+
+    # Calcular filas sin match para advertencia
+    sin_match = df_merged[df_merged["Nombre STD"].isna()]["DESCRIPCIÓN"].dropna().unique().tolist()
+    warnings = []
+    if sin_match:
+        warnings.append(
+            f"{len(sin_match)} producto(s) sin homologación en el Mapa: {', '.join(str(x) for x in sin_match[:5])}"
+            + (" ..." if len(sin_match) > 5 else "")
+        )
+
+    return df_merged, warnings
+
+
 def cargar_programa_usuario():
     """Maneja la carga del archivo de programa del usuario."""
     if "df_prog" not in st.session_state:
         with st.container():
             st.markdown("### 📤 Cargar Programa")
             archivo_programa = st.file_uploader(
-                "Sube el archivo de programa (xlsx)", 
-                type=["xlsx"], 
+                "Sube el archivo de programa (.xlsm o .xlsx)",
+                type=["xlsx", "xlsm"],
                 key="carga_global",
-                help="Archivo debe contener la hoja 'TablaCombinada' con columna 'Nombre STD'"
+                help="Archivo debe contener las hojas 'Prog LAM REN' y 'Mapa'"
             )
-            
+
             if archivo_programa is not None:
-                with st.spinner("Cargando archivo..."):
+                with st.spinner("Cargando y cruzando programa con Mapa..."):
                     try:
-                        df_prog = pd.read_excel(archivo_programa, sheet_name="TablaCombinada")
-                        
-                        # Validaciones básicas
-                        if "Nombre STD" not in df_prog.columns:
-                            st.error("❌ El archivo debe contener la columna 'Nombre STD'")
-                            return
-                        
-                        df_prog_clean = df_prog.dropna(subset=["Nombre STD"]).reset_index(drop=True)
-                        
+                        archivo_bytes = io.BytesIO(archivo_programa.read())
+                        df_merged, warnings = _cruzar_programa_con_mapa(archivo_bytes)
+
+                        df_prog_clean = df_merged.dropna(subset=["Nombre STD"]).reset_index(drop=True)
+
                         if df_prog_clean.empty:
-                            st.error("❌ No se encontraron datos válidos en el archivo")
+                            st.error("❌ No se encontraron filas con 'Nombre STD' tras el cruce. Verifica que la hoja 'Mapa' esté actualizada.")
                             return
-                        
+
                         st.session_state.df_prog = df_prog_clean
-                        st.success(f"✅ Archivo cargado exitosamente ({len(df_prog_clean)} registros)")
+
+                        for w in warnings:
+                            st.warning(f"⚠️ {w}")
+
+                        st.success(f"✅ Programa cargado y cruzado exitosamente ({len(df_prog_clean)} registros)")
                         st.rerun()
-                        
+
+                    except ValueError as e:
+                        st.error(f"❌ {e}")
                     except Exception as e:
-                        st.error(f"❌ Error al cargar archivo: {e}")
+                        st.error(f"❌ Error al procesar archivo: {e}")
                         logger.error(f"Error cargando programa: {str(e)}")
 
 # =====================================
@@ -560,7 +633,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         # NUEVO RESUMEN: Cambios por Componente
         # ===============================
         st.markdown("---")
-        st.markdown("### 📊 Resumen de Cambios por Componente")
+        st.markdown("### Resumen")
 
         resumen_total = pd.DataFrame()
 
