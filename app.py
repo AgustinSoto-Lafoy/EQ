@@ -313,17 +313,21 @@ def comparar_desbaste(df_desbaste, familia_a, familia_b):
 
 @st.cache_data
 def obtener_tiempo_cambio(df_tiempo, producto_origen, producto_destino):
-    """Obtiene el tiempo de cambio entre dos productos - VERSIÓN SEGURA."""
+    """
+    Retorna el tiempo exacto para la dirección Origen → Destino.
+    No hace fallback inverso: la dirección del cambio es relevante
+    (124 pares asimétricos en BBDD_Tiempo).
+    """
     try:
         columnas_requeridas = ["Nombre STD Origen", "Nombre STD Destino", "Minutos Cambio"]
         if not all(col in df_tiempo.columns for col in columnas_requeridas):
             return None
-            
-        mask = (df_tiempo["Nombre STD Origen"] == producto_origen) & \
-               (df_tiempo["Nombre STD Destino"] == producto_destino)
-        
+        mask = (
+            (df_tiempo["Nombre STD Origen"] == producto_origen) &
+            (df_tiempo["Nombre STD Destino"] == producto_destino)
+        )
         resultado = df_tiempo.loc[mask, "Minutos Cambio"]
-        return resultado.iloc[0] if not resultado.empty else None
+        return int(resultado.iloc[0]) if not resultado.empty else None
     except Exception as e:
         logger.error(f"Error obteniendo tiempo: {str(e)}")
         return None
@@ -555,18 +559,23 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             st.warning("⚠️ No se encontraron datos para uno o ambos productos.")
             return
         
-        # Mostrar tiempo de cambio sin título propio
-        # Buscar tiempo en ambas direcciones
+        # Tiempo de cambio — respetar direccionalidad (A→B puede ≠ B→A)
         tiempo_ab = obtener_tiempo_cambio(df_tiempo, producto_a, producto_b)
         tiempo_ba = obtener_tiempo_cambio(df_tiempo, producto_b, producto_a)
-        
-        # Tomar el tiempo que esté disponible
-        tiempo_cambio = tiempo_ab if tiempo_ab is not None else tiempo_ba
-        
-        if tiempo_cambio:
-            st.success(f"⏱️ **Tiempo de cambio:** {tiempo_cambio} minutos")
-        else:
+
+        if tiempo_ab is None and tiempo_ba is None:
             st.warning("⚠️ **Tiempo de cambio:** No registrado para estos productos")
+        elif tiempo_ab == tiempo_ba or tiempo_ba is None:
+            st.success(f"⏱️ **Tiempo de cambio:** {tiempo_ab} min")
+        elif tiempo_ab is None:
+            st.success(f"⏱️ **Tiempo de cambio:** {tiempo_ba} min (solo dirección inversa registrada)")
+        else:
+            # Asimétrico: mostrar ambas direcciones
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                st.success(f"⏱️ **{producto_a} → {producto_b}:** {tiempo_ab} min")
+            with col_t2:
+                st.info(f"⏱️ **{producto_b} → {producto_a}:** {tiempo_ba} min")
         
         # Opción de filtro encima de las tablas
         st.markdown("---")
@@ -799,6 +808,74 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
         st.error(f"Error analizando secuencia: {str(e)}")
         logger.error(f"Error en mostrar_secuencia_programa: {str(e)}")
 
+def _exportar_maestranza_xlsx(df_resumen, df_frecuencia, df_prog_completo):
+    """
+    Genera el Excel de Maestranza con Table style (TableStyleLight15),
+    columna Nota en Frecuencia_Cilindros, y nombre de columna Toneladas.
+    Retorna un BytesIO listo para st.download_button.
+    """
+    import openpyxl
+    from openpyxl import Workbook
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    from openpyxl.utils import get_column_letter
+
+    def _escribir_tabla(ws, df, table_name, table_style="TableStyleLight15"):
+        """Escribe df en ws como Excel Table con estilo."""
+        for r in dataframe_to_rows(df, index=False, header=True):
+            ws.append(r)
+        n_rows = len(df) + 1  # +1 header
+        n_cols = len(df.columns)
+        ref = f"A1:{get_column_letter(n_cols)}{n_rows}"
+        tab = Table(displayName=table_name, ref=ref)
+        style = TableStyleInfo(
+            name=table_style,
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False
+        )
+        tab.tableStyleInfo = style
+        ws.add_table(tab)
+        # Autofit columnas (estimado por contenido)
+        for col_cells in ws.columns:
+            max_len = max(
+                (len(str(c.value)) if c.value is not None else 0) for c in col_cells
+            )
+            ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max_len + 4, 40)
+
+    wb = Workbook()
+
+    # --- Hoja 1: Resumen_Maestranza ---
+    ws1 = wb.active
+    ws1.title = "Resumen_Maestranza"
+    _escribir_tabla(ws1, df_resumen, "Tabla1")
+
+    # --- Hoja 2: Frecuencia_Cilindros ---
+    if not df_frecuencia.empty:
+        ws2 = wb.create_sheet("Frecuencia_Cilindros")
+        # Insertar columna Nota vacía en posición 2 (después de Código Canal)
+        df_frec_export = df_frecuencia.copy().rename(columns={"Toneladas": "Toneladas"})
+        df_frec_export.insert(1, "Nota", None)
+        _escribir_tabla(ws2, df_frec_export, "Tabla2")
+
+    # --- Hoja 3: Programa_Completo ---
+    ws3 = wb.create_sheet("Programa_Completo")
+    for r in dataframe_to_rows(df_prog_completo, index=False, header=True):
+        ws3.append(r)
+    # Sin Table style en programa (igual al archivo deseado)
+    for col_cells in ws3.columns:
+        max_len = max(
+            (len(str(c.value)) if c.value is not None else 0) for c in col_cells
+        )
+        ws3.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max_len + 4, 50)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
 def mostrar_resumen_maestranza(df_ddp):
     """Muestra el resumen técnico para maestranza con análisis de cilindros."""
     
@@ -819,9 +896,9 @@ def mostrar_resumen_maestranza(df_ddp):
                 df_prog
                 .groupby(["Grupo", "Nombre STD"], as_index=False)
                 .agg({"PROGR": "sum"})
-                .rename(columns={"PROGR": "Toneladas Programadas"})
+                .rename(columns={"PROGR": "Toneladas"})
             )
-            df_programa["Toneladas Programadas"] = df_programa["Toneladas Programadas"].astype(int)
+            df_programa["Toneladas"] = df_programa["Toneladas"].astype(int)
             
             # Seleccionar primeras ocurrencias por Producto y STD para posiciones específicas
             posiciones_deseadas = ["M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6"]
@@ -853,19 +930,19 @@ def mostrar_resumen_maestranza(df_ddp):
                     ).drop(columns=["Producto"], errors='ignore')
                     
                     # Ordenar columnas
-                    columnas_orden = ["Nombre STD", "Toneladas Programadas"] + posiciones_deseadas
+                    columnas_orden = ["Nombre STD", "Toneladas"] + posiciones_deseadas
                     df_resumen = df_resumen[[col for col in columnas_orden if col in df_resumen.columns]]
                 else:
                     # Si no hay datos de pivote, usar solo programa base
-                    df_resumen = df_programa[["Nombre STD", "Toneladas Programadas"]]
+                    df_resumen = df_programa[["Nombre STD", "Toneladas"]]
             else:
                 # Si no tenemos las columnas necesarias, usar solo programa base
-                df_resumen = df_programa[["Nombre STD", "Toneladas Programadas"]]
+                df_resumen = df_programa[["Nombre STD", "Toneladas"]]
                 st.warning("⚠️ No se encontraron columnas 'STD' o 'Código Canal' para análisis detallado")
         
         # Mostrar métricas generales
         try:
-            total_toneladas = df_resumen["Toneladas Programadas"].sum()
+            total_toneladas = df_resumen["Toneladas"].sum()
             productos_unicos = df_resumen["Nombre STD"].nunique()
             
             col1, col2, col3 = st.columns(3)
@@ -895,7 +972,7 @@ def mostrar_resumen_maestranza(df_ddp):
             
             for _, row in df_programa.iterrows():
                 producto = row["Nombre STD"]
-                toneladas = row["Toneladas Programadas"]
+                toneladas = row["Toneladas"]
                 
                 # Obtener todos los códigos de canal para este producto
                 if "Código Canal" in df_ddp.columns:
@@ -906,7 +983,7 @@ def mostrar_resumen_maestranza(df_ddp):
                         codigos_programa.append({
                             "Nombre STD": producto,
                             "Código Canal": codigo,
-                            "Toneladas Programadas": toneladas
+                            "Toneladas": toneladas
                         })
             
             # Convertir a DataFrame
@@ -919,10 +996,10 @@ def mostrar_resumen_maestranza(df_ddp):
                     .groupby("Código Canal", dropna=True)
                     .agg(
                         Frecuencia=("Nombre STD", "count"),
-                        Toneladas_Programadas=("Toneladas Programadas", "sum")
+                        Toneladas=("Toneladas", "sum")
                     )
                     .reset_index()
-                    .sort_values("Toneladas_Programadas", ascending=False)
+                    .sort_values("Toneladas", ascending=False)
                 )
                 
                 # Mostrar tabla de frecuencias
@@ -949,58 +1026,30 @@ def mostrar_resumen_maestranza(df_ddp):
             frecuencia_en_programa = pd.DataFrame()
         
         # ===============================================
-        # EXPORTACIÓN MEJORADA
+        # EXPORTACIÓN
         # ===============================================
-        
+
         st.markdown("---")
         st.markdown("### 📥 Exportar Datos")
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
-            # Excel completo con múltiples hojas
             try:
-                buffer_completo = io.BytesIO()
-                with pd.ExcelWriter(buffer_completo, engine="xlsxwriter") as writer:
-                    # Hoja principal
-                    df_resumen.to_excel(writer, index=False, sheet_name="Resumen_Maestranza")
-                    
-                    # Hoja de frecuencia de cilindros
-                    if not frecuencia_en_programa.empty:
-                        frecuencia_en_programa.to_excel(writer, index=False, sheet_name="Frecuencia_Cilindros")
-                    
-                    # Hoja con programa completo
-                    st.session_state.df_prog.to_excel(writer, index=False, sheet_name="Programa_Completo")
-                    
-                    # Formatear hojas
-                    workbook = writer.book
-                    header_format = workbook.add_format({
-                        'bold': True,
-                        'bg_color': '#4CAF50',
-                        'font_color': 'white',
-                        'border': 1
-                    })
-                    
-                    for sheet_name in writer.sheets:
-                        worksheet = writer.sheets[sheet_name]
-                        worksheet.set_row(0, 20, header_format)
-                        worksheet.autofit()
-                
-                buffer_completo.seek(0)
-                
+                buffer_completo = _exportar_maestranza_xlsx(
+                    df_resumen, frecuencia_en_programa, st.session_state.df_prog
+                )
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                filename = f"Resumen_Maestranza_{timestamp}.xlsx"
-                
                 st.download_button(
                     label="Descargar Resumen Técnico Completo",
                     data=buffer_completo,
-                    file_name=filename,
+                    file_name=f"Resumen_Maestranza_{timestamp}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     help="Incluye resumen maestranza, frecuencia de cilindros y programa completo"
                 )
             except Exception as e:
-                logger.error(f"Error creando Excel completo: {str(e)}")
-                st.error("Error generando archivo Excel completo")
+                logger.error(f"Error creando Excel: {str(e)}")
+                st.error("Error generando archivo Excel")
         
     except Exception as e:
         st.error(f"Error generando resumen maestranza: {str(e)}")
