@@ -986,50 +986,43 @@ def mostrar_resumen_maestranza(df_ddp):
             logger.error(f"Error calculando métricas maestranza: {str(e)}")
         
         # -----------------------------------------------
-        # AUDITORÍAS — visibles antes de la tabla
+        # AUDITORÍAS — sección consolidada
         # -----------------------------------------------
-        hay_alertas = False
+        hay_alertas = bool(productos_solo_nulos or productos_sin_ddp or audit_posiciones)
 
-        if productos_solo_nulos:
-            hay_alertas = True
-            with st.expander(f"⚠️ {len(productos_solo_nulos)} producto(s) excluidos por PROGR vacío", expanded=True):
-                st.warning(
-                    "Estos productos aparecen en el programa solo con PROGR=vacío "
-                    "y fueron excluidos del resumen. Si deben tener tonelaje, corrige el programa."
-                )
-                st.dataframe(
-                    pd.DataFrame({"Producto excluido (PROGR vacío)": productos_solo_nulos}),
-                    use_container_width=True, hide_index=True
-                )
+        if hay_alertas:
+            n_criticos = len(productos_sin_ddp)
+            n_advertencias = len(productos_solo_nulos) + len(audit_posiciones)
+            titulo = f"{'🔴' if n_criticos else '⚠️'} Inconsistencias detectadas — {n_criticos} crítica(s), {n_advertencias} advertencia(s)"
 
-        if productos_sin_ddp:
-            hay_alertas = True
-            with st.expander(f"🔴 {len(productos_sin_ddp)} producto(s) sin datos de cilindros en DDP", expanded=True):
-                st.error(
-                    "Estos productos están en el programa pero no se encontraron en el "
-                    "Consolidado_Laminador. Las columnas M1–A6 quedarán vacías. "
-                    "Verifica que el nombre STD coincida exactamente con el DDP."
-                )
-                st.dataframe(
-                    pd.DataFrame({"Producto sin datos en DDP": productos_sin_ddp}),
-                    use_container_width=True, hide_index=True
-                )
+            with st.expander(titulo, expanded=True):
 
-        if audit_posiciones:
-            hay_alertas = True
-            with st.expander(f"🟡 {len(audit_posiciones)} producto(s) con posiciones sin código de canal", expanded=False):
-                st.warning(
-                    "Estos productos existen en el DDP pero no tienen Código Canal "
-                    "registrado para algunas posiciones. Puede ser intencional (posición no usada) "
-                    "o un dato faltante."
-                )
-                st.dataframe(
-                    pd.DataFrame(audit_posiciones),
-                    use_container_width=True, hide_index=True
-                )
+                if productos_sin_ddp:
+                    st.error(f"**{len(productos_sin_ddp)} producto(s) no encontrados en DDP** — columnas M1–A6 vacías y sin datos en frecuencia de cilindros. Verifica que el nombre STD coincida exactamente con el Consolidado_Laminador.")
+                    st.dataframe(
+                        pd.DataFrame({"Producto sin datos en DDP": productos_sin_ddp}),
+                        use_container_width=True, hide_index=True
+                    )
 
-        if not hay_alertas:
-            st.success("✅ Sin inconsistencias detectadas — todos los productos tienen datos completos.")
+                if productos_solo_nulos:
+                    if productos_sin_ddp:
+                        st.markdown("---")
+                    st.warning(f"**{len(productos_solo_nulos)} producto(s) excluidos por PROGR vacío** — aparecen en el programa solo con tonelaje en blanco. Si deben producirse, corrige el programa.")
+                    st.dataframe(
+                        pd.DataFrame({"Producto excluido (PROGR vacío)": productos_solo_nulos}),
+                        use_container_width=True, hide_index=True
+                    )
+
+                if audit_posiciones:
+                    if productos_sin_ddp or productos_solo_nulos:
+                        st.markdown("---")
+                    st.warning(f"**{len(audit_posiciones)} producto(s) con posiciones M1–A6 sin Código Canal** — puede ser intencional si la posición no se usa, o un dato faltante en el DDP.")
+                    st.dataframe(
+                        pd.DataFrame(audit_posiciones),
+                        use_container_width=True, hide_index=True
+                    )
+        else:
+            st.success("✅ Sin inconsistencias — todos los productos tienen datos completos.")
 
         # Tabla principal
         st.markdown("### Resumen Detallado por Producto")
@@ -1044,7 +1037,6 @@ def mostrar_resumen_maestranza(df_ddp):
         try:
             # Crear una lista con todos los códigos de canal para cada producto en el programa
             codigos_programa = []
-            productos_sin_canal = []  # AUDITORÍA 4: productos sin ningún Código Canal
 
             for _, row in df_programa.iterrows():
                 producto = row["Nombre STD"]
@@ -1052,16 +1044,12 @@ def mostrar_resumen_maestranza(df_ddp):
 
                 if "Código Canal" in df_ddp.columns:
                     codigos_producto = df_ddp[df_ddp["Producto"] == producto]["Código Canal"].dropna().unique()
-
-                    if len(codigos_producto) == 0:
-                        productos_sin_canal.append(producto)
-                    else:
-                        for codigo in codigos_producto:
-                            codigos_programa.append({
-                                "Nombre STD": producto,
-                                "Código Canal": codigo,
-                                "Toneladas": toneladas
-                            })
+                    for codigo in codigos_producto:
+                        codigos_programa.append({
+                            "Nombre STD": producto,
+                            "Código Canal": codigo,
+                            "Toneladas": toneladas
+                        })
             
             # Convertir a DataFrame
             df_codigos_programa = pd.DataFrame(codigos_programa)
@@ -1097,19 +1085,6 @@ def mostrar_resumen_maestranza(df_ddp):
                 st.warning("No se encontraron códigos de canal para los productos en el programa.")
                 frecuencia_en_programa = pd.DataFrame()
 
-            # AUDITORÍA 4: productos sin ningún Código Canal registrado
-            if productos_sin_canal:
-                with st.expander(f"🔴 {len(set(productos_sin_canal))} producto(s) sin Código Canal en DDP", expanded=True):
-                    st.error(
-                        "Estos productos no tienen ningún Código Canal registrado en el "
-                        "Consolidado_Laminador. No aparecerán en la frecuencia de cilindros. "
-                        "Verifica el DDP o el nombre STD."
-                    )
-                    st.dataframe(
-                        pd.DataFrame({"Producto sin Código Canal": sorted(set(productos_sin_canal))}),
-                        use_container_width=True, hide_index=True
-                    )
-                
         except Exception as e:
             logger.error(f"Error calculando frecuencia de cilindros: {str(e)}")
             st.error("Error calculando frecuencia de cilindros")
