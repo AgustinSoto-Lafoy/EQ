@@ -885,24 +885,33 @@ def mostrar_resumen_maestranza(df_ddp):
         with st.spinner("Generando resumen para maestranza..."):
             # Detectar bloques consecutivos del mismo producto
             df_prog["Grupo"] = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
-            
+
             # Verificar que existe la columna PROGR
             if "PROGR" not in df_prog.columns:
                 st.error("❌ El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
                 return
-            
-            # Agrupar y sumar toneladas
+
+            # --- AUDITORÍA 1: filas con PROGR nulo ---
+            filas_sin_progr = df_prog[df_prog["PROGR"].isna()]
+            productos_sin_progr = filas_sin_progr["Nombre STD"].dropna().unique().tolist()
+
+            # Agrupar y sumar toneladas (excluir PROGR nulo para evitar sum→0)
             df_programa = (
-                df_prog
+                df_prog.dropna(subset=["PROGR"])
                 .groupby(["Grupo", "Nombre STD"], as_index=False)
                 .agg({"PROGR": "sum"})
                 .rename(columns={"PROGR": "Toneladas"})
             )
+            df_programa = df_programa[df_programa["Toneladas"] > 0].reset_index(drop=True)
             df_programa["Toneladas"] = df_programa["Toneladas"].astype(int)
-            
+
+            # Productos con PROGR nulo que NO aparecen con tonelaje real en ningún otro bloque
+            productos_en_programa = set(df_programa["Nombre STD"].unique())
+            productos_solo_nulos = [p for p in productos_sin_progr if p not in productos_en_programa]
+
             # Seleccionar primeras ocurrencias por Producto y STD para posiciones específicas
             posiciones_deseadas = ["M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6"]
-            
+
             # Verificar que tenemos las columnas necesarias
             if "STD" in df_ddp.columns and "Código Canal" in df_ddp.columns:
                 df_canal_unico = (
@@ -911,33 +920,53 @@ def mostrar_resumen_maestranza(df_ddp):
                     .sort_values(["Producto", "STD"])
                     .drop_duplicates(subset=["Producto", "STD"], keep="first")
                 )
-                
-                # Pivotear para obtener una columna por posición
+
                 if not df_canal_unico.empty:
                     df_canal_pivot = df_canal_unico.pivot(
-                        index="Producto", 
-                        columns="STD", 
+                        index="Producto",
+                        columns="STD",
                         values="Código Canal"
                     ).reset_index()
                     df_canal_pivot.columns.name = None
-                    
-                    # Unir con programa
+
+                    # --- AUDITORÍA 2: productos del programa sin match en DDP ---
+                    productos_en_ddp = set(df_canal_pivot["Producto"].unique())
+                    productos_sin_ddp = [
+                        p for p in df_programa["Nombre STD"].unique()
+                        if p not in productos_en_ddp
+                    ]
+
                     df_resumen = df_programa.merge(
-                        df_canal_pivot, 
-                        left_on="Nombre STD", 
-                        right_on="Producto", 
+                        df_canal_pivot,
+                        left_on="Nombre STD",
+                        right_on="Producto",
                         how="left"
                     ).drop(columns=["Producto"], errors='ignore')
-                    
-                    # Ordenar columnas
+
+                    # --- AUDITORÍA 3: posiciones faltantes por producto ---
+                    posiciones_presentes = [p for p in posiciones_deseadas if p in df_resumen.columns]
+                    audit_posiciones = []
+                    for _, row in df_resumen.iterrows():
+                        faltantes = [
+                            pos for pos in posiciones_presentes
+                            if pd.isna(row.get(pos))
+                        ]
+                        if faltantes:
+                            audit_posiciones.append({
+                                "Producto": row["Nombre STD"],
+                                "Posiciones sin datos": ", ".join(faltantes)
+                            })
+
                     columnas_orden = ["Nombre STD", "Toneladas"] + posiciones_deseadas
                     df_resumen = df_resumen[[col for col in columnas_orden if col in df_resumen.columns]]
                 else:
-                    # Si no hay datos de pivote, usar solo programa base
                     df_resumen = df_programa[["Nombre STD", "Toneladas"]]
+                    productos_sin_ddp = list(df_programa["Nombre STD"].unique())
+                    audit_posiciones = []
             else:
-                # Si no tenemos las columnas necesarias, usar solo programa base
                 df_resumen = df_programa[["Nombre STD", "Toneladas"]]
+                productos_sin_ddp = list(df_programa["Nombre STD"].unique())
+                audit_posiciones = []
                 st.warning("⚠️ No se encontraron columnas 'STD' o 'Código Canal' para análisis detallado")
         
         # Mostrar métricas generales
@@ -956,6 +985,52 @@ def mostrar_resumen_maestranza(df_ddp):
         except Exception as e:
             logger.error(f"Error calculando métricas maestranza: {str(e)}")
         
+        # -----------------------------------------------
+        # AUDITORÍAS — visibles antes de la tabla
+        # -----------------------------------------------
+        hay_alertas = False
+
+        if productos_solo_nulos:
+            hay_alertas = True
+            with st.expander(f"⚠️ {len(productos_solo_nulos)} producto(s) excluidos por PROGR vacío", expanded=True):
+                st.warning(
+                    "Estos productos aparecen en el programa solo con PROGR=vacío "
+                    "y fueron excluidos del resumen. Si deben tener tonelaje, corrige el programa."
+                )
+                st.dataframe(
+                    pd.DataFrame({"Producto excluido (PROGR vacío)": productos_solo_nulos}),
+                    use_container_width=True, hide_index=True
+                )
+
+        if productos_sin_ddp:
+            hay_alertas = True
+            with st.expander(f"🔴 {len(productos_sin_ddp)} producto(s) sin datos de cilindros en DDP", expanded=True):
+                st.error(
+                    "Estos productos están en el programa pero no se encontraron en el "
+                    "Consolidado_Laminador. Las columnas M1–A6 quedarán vacías. "
+                    "Verifica que el nombre STD coincida exactamente con el DDP."
+                )
+                st.dataframe(
+                    pd.DataFrame({"Producto sin datos en DDP": productos_sin_ddp}),
+                    use_container_width=True, hide_index=True
+                )
+
+        if audit_posiciones:
+            hay_alertas = True
+            with st.expander(f"🟡 {len(audit_posiciones)} producto(s) con posiciones sin código de canal", expanded=False):
+                st.warning(
+                    "Estos productos existen en el DDP pero no tienen Código Canal "
+                    "registrado para algunas posiciones. Puede ser intencional (posición no usada) "
+                    "o un dato faltante."
+                )
+                st.dataframe(
+                    pd.DataFrame(audit_posiciones),
+                    use_container_width=True, hide_index=True
+                )
+
+        if not hay_alertas:
+            st.success("✅ Sin inconsistencias detectadas — todos los productos tienen datos completos.")
+
         # Tabla principal
         st.markdown("### Resumen Detallado por Producto")
         st.dataframe(df_resumen, use_container_width=True)
@@ -969,22 +1044,24 @@ def mostrar_resumen_maestranza(df_ddp):
         try:
             # Crear una lista con todos los códigos de canal para cada producto en el programa
             codigos_programa = []
-            
+            productos_sin_canal = []  # AUDITORÍA 4: productos sin ningún Código Canal
+
             for _, row in df_programa.iterrows():
                 producto = row["Nombre STD"]
                 toneladas = row["Toneladas"]
-                
-                # Obtener todos los códigos de canal para este producto
+
                 if "Código Canal" in df_ddp.columns:
                     codigos_producto = df_ddp[df_ddp["Producto"] == producto]["Código Canal"].dropna().unique()
-                    
-                    # Agregar cada código con su información
-                    for codigo in codigos_producto:
-                        codigos_programa.append({
-                            "Nombre STD": producto,
-                            "Código Canal": codigo,
-                            "Toneladas": toneladas
-                        })
+
+                    if len(codigos_producto) == 0:
+                        productos_sin_canal.append(producto)
+                    else:
+                        for codigo in codigos_producto:
+                            codigos_programa.append({
+                                "Nombre STD": producto,
+                                "Código Canal": codigo,
+                                "Toneladas": toneladas
+                            })
             
             # Convertir a DataFrame
             df_codigos_programa = pd.DataFrame(codigos_programa)
@@ -1015,10 +1092,23 @@ def mostrar_resumen_maestranza(df_ddp):
                 with col3:
                     max_frecuencia = frecuencia_en_programa.iloc[0]["Frecuencia"] if not frecuencia_en_programa.empty else 0
                     st.metric("Frecuencia Máxima", max_frecuencia)
-                
+
             else:
                 st.warning("No se encontraron códigos de canal para los productos en el programa.")
                 frecuencia_en_programa = pd.DataFrame()
+
+            # AUDITORÍA 4: productos sin ningún Código Canal registrado
+            if productos_sin_canal:
+                with st.expander(f"🔴 {len(set(productos_sin_canal))} producto(s) sin Código Canal en DDP", expanded=True):
+                    st.error(
+                        "Estos productos no tienen ningún Código Canal registrado en el "
+                        "Consolidado_Laminador. No aparecerán en la frecuencia de cilindros. "
+                        "Verifica el DDP o el nombre STD."
+                    )
+                    st.dataframe(
+                        pd.DataFrame({"Producto sin Código Canal": sorted(set(productos_sin_canal))}),
+                        use_container_width=True, hide_index=True
+                    )
                 
         except Exception as e:
             logger.error(f"Error calculando frecuencia de cilindros: {str(e)}")
@@ -1205,11 +1295,12 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
             
             # Agrupar y sumar toneladas
             df_programa = (
-                df_prog
+                df_prog.dropna(subset=["PROGR"])
                 .groupby(["Grupo", "Nombre STD"], as_index=False)
                 .agg({"PROGR": "sum"})
                 .rename(columns={"PROGR": "Toneladas"})
             )
+            df_programa = df_programa[df_programa["Toneladas"] > 0].reset_index(drop=True)
             df_programa["Toneladas"] = df_programa["Toneladas"].astype(int)
             
             # Análisis de cambios de utilaje en la secuencia
