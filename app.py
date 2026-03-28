@@ -136,10 +136,16 @@ def cargar_programa_usuario():
             st.markdown("### 📤 Cargar Programa")
             archivo_programa = st.file_uploader(
                 "Sube el archivo de programa (.xlsm o .xlsx)",
-                type=["xlsx", "xlsm"],
+                type=None,  # Sin filtro MIME: Streamlit rechaza xlsm por su MIME type
                 key="carga_global",
                 help="Archivo debe contener las hojas 'Prog LAM REN' y 'Mapa'"
             )
+
+            if archivo_programa is not None:
+                ext = archivo_programa.name.rsplit(".", 1)[-1].lower()
+                if ext not in ("xlsx", "xlsm"):
+                    st.error(f"❌ Formato no soportado (.{ext}). Sube un archivo .xlsx o .xlsm.")
+                    archivo_programa = None
 
             if archivo_programa is not None:
                 with st.spinner("Cargando y cruzando programa con Mapa..."):
