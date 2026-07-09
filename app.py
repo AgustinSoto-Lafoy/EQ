@@ -100,12 +100,12 @@ def _cruzar_programa_con_mapa(archivo_bytes):
     data_rows = all_rows[1:]
     df_prog = pd.DataFrame(data_rows, columns=headers)
 
-    # Filtrar solo filas con CLASIFICADA numérico (filas reales de producción)
-    df_prog = df_prog[pd.to_numeric(df_prog["CLASIFICADA"], errors="coerce").notna()].copy()
+    # Filtrar filas que tengan al menos DESCRIPCIÓN no nula
+    df_prog = df_prog[df_prog["DESCRIPCIÓN"].notna()].copy()
     df_prog.reset_index(drop=True, inplace=True)
 
     if df_prog.empty:
-        raise ValueError("No se encontraron filas de producción en 'Prog LAM REN'.")
+        raise ValueError("No se encontraron filas con DESCRIPCIÓN en 'Prog LAM REN'.")
 
     # --- Cruce ---
     df_prog["_key"] = df_prog["DESCRIPCIÓN"].astype(str).str.strip()
@@ -153,18 +153,21 @@ def cargar_programa_usuario():
                         archivo_bytes = io.BytesIO(archivo_programa.read())
                         df_merged, warnings = _cruzar_programa_con_mapa(archivo_bytes)
 
-                        df_prog_clean = df_merged.dropna(subset=["Nombre STD"]).reset_index(drop=True)
+                        st.session_state.df_prog = df_merged.reset_index(drop=True)
 
-                        if df_prog_clean.empty:
-                            st.error("❌ No se encontraron filas con 'Nombre STD' tras el cruce. Verifica que la hoja 'Mapa' esté actualizada.")
-                            return
+                        if warnings:
+                            sin_match = df_merged[df_merged["Nombre STD"].isna()]["DESCRIPCIÓN"].dropna().unique().tolist()
+                            with st.expander(f"⚠️ {len(sin_match)} producto(s) sin homologación en el Mapa — requieren corrección", expanded=True):
+                                st.warning("Estos productos fueron cargados pero **no tienen Nombre STD**. No podrán usarse en comparaciones hasta que se agreguen al Mapa.")
+                                st.dataframe(
+                                    pd.DataFrame({"DESCRIPCIÓN sin match en Mapa": sin_match}),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
 
-                        st.session_state.df_prog = df_prog_clean
-
-                        for w in warnings:
-                            st.warning(f"⚠️ {w}")
-
-                        st.success(f"✅ Programa cargado y cruzado exitosamente ({len(df_prog_clean)} registros)")
+                        total = len(df_merged)
+                        con_match = df_merged["Nombre STD"].notna().sum()
+                        st.success(f"✅ Programa cargado: {total} registros ({con_match} con homologación, {total - con_match} sin match)")
                         st.rerun()
 
                     except ValueError as e:
