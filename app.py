@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import math
 import numpy as np
 from datetime import datetime
 import logging
@@ -51,12 +52,30 @@ def cargar_datos():
         except Exception as e:
             errores.append(f"Error cargando {archivo}: {str(e)}")
             logger.error(f"Error cargando {archivo}: {str(e)}")
-    
+
+    # --- Rendimientos: segunda hoja del Consolidado_Laminador ---
+    # Fuente adicional (no reemplaza la lectura anterior, que solo toma la primera
+    # hoja del Consolidado como DDP). Si falla, no bloquea el resto de la app.
+    df_rendimiento = None
+    try:
+        hojas_consolidado = pd.ExcelFile(archivos["ddp"]).sheet_names
+        if len(hojas_consolidado) >= 2:
+            df_rendimiento = pd.read_excel(archivos["ddp"], sheet_name=hojas_consolidado[1])
+            logger.info(f"Hoja de rendimientos '{hojas_consolidado[1]}' cargada exitosamente")
+        else:
+            logger.warning("El Consolidado_Laminador no tiene una segunda hoja con rendimientos.")
+    except Exception as e:
+        logger.error(f"Error cargando hoja de rendimientos: {str(e)}")
+
     if errores:
         st.error("❌ Errores al cargar archivos base:\n" + "\n".join(errores))
-        return None, None, None
-    
-    return datos.get("ddp"), datos.get("tiempo"), datos.get("desbaste")
+        return None, None, None, None
+
+    if df_rendimiento is None:
+        st.warning("⚠️ No se pudo cargar la hoja de rendimientos del Consolidado (segunda hoja). "
+                    "Los cálculos de canales/cilindros requeridos no estarán disponibles.")
+
+    return datos.get("ddp"), datos.get("tiempo"), datos.get("desbaste"), df_rendimiento
 
 def _cruzar_programa_con_mapa(archivo_bytes):
     """
@@ -315,6 +334,75 @@ def comparar_desbaste(df_desbaste, familia_a, familia_b):
         return pd.DataFrame()
 
 @st.cache_data
+def clasificar_cambios_codigo_canal(df_a, df_b):
+    """
+    Clasifica, posición por posición (STD), los cambios de Código Canal entre
+    un producto origen (df_a) y un producto destino (df_b).
+
+    Nueva lógica (reemplaza la comparación por sola posición):
+      1. Primero se determina si el código de canal de la posición en df_a
+         sigue existiendo en CUALQUIER posición de df_b (existencia global).
+      2. Solo después se decide la categoría:
+         - "Regulación": el código sigue existiendo en df_b (aunque cambie de
+           posición). Se reordena y calibra el mismo stand/código de canal;
+           NO corresponde cambio de stand.
+         - "Cambio completo": el código deja de existir por completo en df_b.
+           Corresponde reemplazar código de canal, guías, stand y elementos asociados.
+
+    Retorna (cambios_completos, regulaciones, detalle) donde detalle es una
+    lista de dicts con Posición, Código Origen, Código Destino y Categoría,
+    solo para las posiciones donde efectivamente hay una diferencia.
+    """
+    detalle = []
+    if (df_a.empty or df_b.empty
+            or "Código Canal" not in df_a.columns or "Código Canal" not in df_b.columns
+            or "STD" not in df_a.columns or "STD" not in df_b.columns):
+        return 0, 0, detalle
+
+    codigos_destino_existentes = set(df_b["Código Canal"].dropna())
+
+    for _, row_a in df_a.iterrows():
+        pos = row_a["STD"]
+        codigo_a = row_a["Código Canal"]
+
+        matching_b = df_b[df_b["STD"] == pos]
+        if matching_b.empty:
+            # Se mantiene el comportamiento previo: solo se evalúan posiciones
+            # presentes en ambos productos.
+            continue
+
+        codigo_b = matching_b.iloc[0]["Código Canal"]
+
+        # Sin cambio en esta posición
+        if pd.isna(codigo_a) and pd.isna(codigo_b):
+            continue
+        try:
+            sin_cambio = codigo_a == codigo_b
+        except (TypeError, ValueError):
+            sin_cambio = str(codigo_a) == str(codigo_b)
+        if sin_cambio:
+            continue
+
+        # Hay diferencia en esta posición: ¿el stand de origen sigue existiendo
+        # en algún lugar del producto destino?
+        if pd.notna(codigo_a) and codigo_a in codigos_destino_existentes:
+            categoria = "Regulación"
+        else:
+            categoria = "Cambio completo"
+
+        detalle.append({
+            "Posición": pos,
+            "Código Origen": codigo_a if pd.notna(codigo_a) else "-",
+            "Código Destino": codigo_b if pd.notna(codigo_b) else "-",
+            "Categoría": categoria
+        })
+
+    cambios_completos = sum(1 for d in detalle if d["Categoría"] == "Cambio completo")
+    regulaciones = sum(1 for d in detalle if d["Categoría"] == "Regulación")
+    return cambios_completos, regulaciones, detalle
+
+
+@st.cache_data
 def obtener_tiempo_cambio(df_tiempo, producto_origen, producto_destino):
     """
     Retorna el tiempo exacto para la dirección Origen → Destino.
@@ -358,7 +446,8 @@ def agrupar_cambios_consecutivos(df):
             "Producto Origen": "first",
             "Producto Destino": "first",
             "Tiempo estimado": "first",
-            "Cambios Código Canal": "first"
+            "Cambios Completo": "first",
+            "Regulaciones": "first"
         }
         
         for col, func in columnas_posibles.items():
@@ -432,7 +521,7 @@ def main():
     
     # Cargar datos base
     with st.spinner("Cargando datos base..."):
-        df_ddp, df_tiempo, df_desbaste = cargar_datos()
+        df_ddp, df_tiempo, df_desbaste, df_rendimiento = cargar_datos()
     
     if df_ddp is None:
         st.error("No se pudieron cargar los datos base. Verifica que los archivos existan.")
@@ -476,7 +565,7 @@ def main():
     with tabs[2]:
         st.subheader("Resumen Técnico para Maestranza")
         if "df_prog" in st.session_state:
-            mostrar_resumen_maestranza(df_ddp)
+            mostrar_resumen_maestranza(df_ddp, df_rendimiento)
         else:
             st.info("📤 Por favor carga primero el archivo de programa.")
 
@@ -702,19 +791,17 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 # Obtener tiempo de cambio
                 tiempo = obtener_tiempo_cambio(df_tiempo, origen, destino)
                 
-                # Calcular cambios en código canal
-                cambios_codigo_canal = 0
+                # Clasificar cambios de código canal: Cambio completo vs Regulación
+                # (un stand solo se cuenta como "cambio completo" si deja de existir
+                # en el producto destino; si se reubica en otra posición, es Regulación)
+                cambios_completos = 0
+                regulaciones = 0
                 try:
                     df_a = df_ddp[df_ddp["Producto"] == origen]
                     df_b = df_ddp[df_ddp["Producto"] == destino]
-                    
+
                     if not df_a.empty and not df_b.empty and "Código Canal" in df_a.columns:
-                        # Comparar códigos de canal de forma segura
-                        for _, row_a in df_a.iterrows():
-                            matching_b = df_b[df_b["STD"] == row_a["STD"]]
-                            if not matching_b.empty:
-                                if row_a["Código Canal"] != matching_b.iloc[0]["Código Canal"]:
-                                    cambios_codigo_canal += 1
+                        cambios_completos, regulaciones, _ = clasificar_cambios_codigo_canal(df_a, df_b)
                 except Exception as e:
                     logger.error(f"Error calculando cambios código canal: {str(e)}")
                 
@@ -732,7 +819,8 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                     "Producto Origen": origen,
                     "Producto Destino": destino,
                     "Tiempo estimado": tiempo,
-                    "Cambios Código Canal": cambios_codigo_canal
+                    "Cambios Completo": cambios_completos,
+                    "Regulaciones": regulaciones
                 })
         
         if not resumen:
@@ -776,18 +864,25 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 else:
                     tiempo_color = "⚪"
                 
-                cambios_canal = fila.get('Cambios Código Canal', 0)
+                cambios_completos_fila = fila.get('Cambios Completo', 0)
+                regulaciones_fila = fila.get('Regulaciones', 0)
                 secuencia = fila.get('Secuencia', idx + 1)
                 origen = fila.get('Producto Origen', 'N/A')
                 destino = fila.get('Producto Destino', 'N/A')
                 
-                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | {cambios_canal} cambios canal"
+                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | {cambios_completos_fila} cambio(s) completo(s) | {regulaciones_fila} regulación(es)"
                 
                 with st.expander(titulo):
                     df_a_cmp = df_ddp[df_ddp["Producto"] == origen]
                     df_b_cmp = df_ddp[df_ddp["Producto"] == destino]
                     
                     if not df_a_cmp.empty and not df_b_cmp.empty:
+                        if "Código Canal" in df_a_cmp.columns:
+                            _, _, detalle_stand = clasificar_cambios_codigo_canal(df_a_cmp, df_b_cmp)
+                            if detalle_stand:
+                                st.markdown("**Clasificación de cambios de stand (Código Canal):**")
+                                st.dataframe(pd.DataFrame(detalle_stand), use_container_width=True, hide_index=True)
+
                         columnas_cmp = [col for col in df_a_cmp.columns if col not in ["STD", "Producto", "Familia"]]
                         resumen_cmp = comparar_productos(df_a_cmp, df_b_cmp, columnas_cmp)
                         
@@ -879,7 +974,132 @@ def _exportar_maestranza_xlsx(df_resumen, df_frecuencia, df_prog_completo):
     return buf
 
 
-def mostrar_resumen_maestranza(df_ddp):
+def _normalizar_codigo_canal(valor):
+    """
+    Normaliza un código de canal para cruzarlo entre archivos con distinta
+    escritura (espacios, guiones, comas, mayúsculas/minúsculas). Se usa
+    únicamente como clave interna de cruce; en pantalla siempre se muestra
+    el código tal como aparece en el DDP/Programa.
+    """
+    if pd.isna(valor):
+        return None
+    s = str(valor).strip().upper()
+    for ch in (" ", "-", ".", ","):
+        s = s.replace(ch, "")
+    return s
+
+
+@st.cache_data
+def calcular_rango_rendimiento(df_rendimiento):
+    """
+    A partir de la segunda hoja del Consolidado (Código Canal, Dureza, Calidad,
+    Rendimiento [t/canal], N° Canales), construye por código de canal el
+    rendimiento mínimo y máximo disponible.
+
+    Cuando un código de canal tiene más de una calidad, la hoja de rendimientos
+    entrega dos valores (rendimiento inferior y superior). Ambos se conservan;
+    nunca se elige uno arbitrariamente. El N° de Canales queda emparejado con
+    el rendimiento de su propia fila (misma calidad), para que el cálculo de
+    cilindros sea consistente.
+    """
+    columnas_salida = [
+        "_codigo_norm",
+        "Rendimiento Mín [t/canal]", "Rendimiento Máx [t/canal]",
+        "N Canales (Rend Mín)", "N Canales (Rend Máx)"
+    ]
+    if df_rendimiento is None or df_rendimiento.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    df = df_rendimiento.copy()
+
+    col_codigo = next((c for c in df.columns if str(c).strip().lower() in ("código canal", "codigo canal")), None)
+    col_rend = next((c for c in df.columns if "rendimiento" in str(c).strip().lower()), None)
+    col_ncanales = next(
+        (c for c in df.columns
+         if "canales" in str(c).strip().lower()
+         and "código" not in str(c).strip().lower()
+         and "codigo" not in str(c).strip().lower()),
+        None
+    )
+
+    if col_codigo is None or col_rend is None:
+        logger.error("La hoja de rendimientos no tiene las columnas esperadas (Código Canal / Rendimiento).")
+        return pd.DataFrame(columns=columnas_salida)
+
+    df["_codigo_norm"] = df[col_codigo].apply(_normalizar_codigo_canal)
+    df = df.dropna(subset=["_codigo_norm", col_rend])
+
+    filas = []
+    for codigo_norm, grupo in df.groupby("_codigo_norm"):
+        fila_min = grupo.loc[grupo[col_rend].idxmin()]
+        fila_max = grupo.loc[grupo[col_rend].idxmax()]
+        filas.append({
+            "_codigo_norm": codigo_norm,
+            "Rendimiento Mín [t/canal]": fila_min[col_rend],
+            "Rendimiento Máx [t/canal]": fila_max[col_rend],
+            "N Canales (Rend Mín)": fila_min[col_ncanales] if col_ncanales else None,
+            "N Canales (Rend Máx)": fila_max[col_ncanales] if col_ncanales else None,
+        })
+
+    return pd.DataFrame(filas, columns=columnas_salida)
+
+
+def _calcular_canales_cilindros(frecuencia_en_programa, df_rendimiento):
+    """
+    Usa las toneladas ya calculadas por código de canal (frecuencia_en_programa)
+    y el rendimiento (mín/máx) de la segunda hoja del Consolidado para estimar:
+      - Canales Requeridos (mín / máx)
+      - Cilindros Requeridos (mín / máx)
+
+    Cuando el código tiene dos calidades (rango de rendimiento), se conserva el
+    rango completo: no se elige un valor arbitrario. Los códigos sin rendimiento
+    registrado quedan con estas columnas en blanco y marcados en 'Observación'.
+    """
+    df_rango = calcular_rango_rendimiento(df_rendimiento)
+
+    df = frecuencia_en_programa.copy()
+    df["_codigo_norm"] = df["Código Canal"].apply(_normalizar_codigo_canal)
+    df = df.merge(df_rango, on="_codigo_norm", how="left")
+
+    def _canales(toneladas, rendimiento):
+        if pd.isna(rendimiento) or rendimiento == 0:
+            return None
+        return math.ceil(toneladas / rendimiento)
+
+    df["Canales Requeridos Mín"] = df.apply(
+        lambda r: _canales(r["Toneladas"], r["Rendimiento Máx [t/canal]"]), axis=1
+    )
+    df["Canales Requeridos Máx"] = df.apply(
+        lambda r: _canales(r["Toneladas"], r["Rendimiento Mín [t/canal]"]), axis=1
+    )
+
+    def _cilindros(row):
+        opciones = []
+        c_min = row.get("Canales Requeridos Mín")
+        c_max = row.get("Canales Requeridos Máx")
+        ncan_de_rend_max = row.get("N Canales (Rend Máx)")   # emparejado con Canales Requeridos Mín
+        ncan_de_rend_min = row.get("N Canales (Rend Mín)")   # emparejado con Canales Requeridos Máx
+
+        if c_min is not None and pd.notna(ncan_de_rend_max) and ncan_de_rend_max:
+            opciones.append(math.ceil(c_min / ncan_de_rend_max))
+        if c_max is not None and pd.notna(ncan_de_rend_min) and ncan_de_rend_min:
+            opciones.append(math.ceil(c_max / ncan_de_rend_min))
+
+        if not opciones:
+            return pd.Series([None, None])
+        return pd.Series([min(opciones), max(opciones)])
+
+    df[["Cilindros Requeridos Mín", "Cilindros Requeridos Máx"]] = df.apply(_cilindros, axis=1)
+
+    df["Observación"] = df["Rendimiento Mín [t/canal]"].apply(
+        lambda v: "Sin rendimiento registrado en Consolidado" if pd.isna(v) else ""
+    )
+
+    df = df.drop(columns=["_codigo_norm", "N Canales (Rend Mín)", "N Canales (Rend Máx)"])
+    return df
+
+
+def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
     """Muestra el resumen técnico para maestranza con análisis de cilindros."""
     
     try:
@@ -1069,7 +1289,24 @@ def mostrar_resumen_maestranza(df_ddp):
                     .reset_index()
                     .sort_values("Toneladas", ascending=False)
                 )
-                
+
+                # --- Canales y cilindros requeridos, usando la segunda hoja del Consolidado ---
+                try:
+                    frecuencia_en_programa = _calcular_canales_cilindros(frecuencia_en_programa, df_rendimiento)
+                    sin_rendimiento = frecuencia_en_programa.loc[
+                        frecuencia_en_programa["Observación"] == "Sin rendimiento registrado en Consolidado",
+                        "Código Canal"
+                    ].tolist()
+                    if sin_rendimiento:
+                        st.warning(
+                            f"⚠️ {len(sin_rendimiento)} código(s) de canal sin rendimiento registrado en el "
+                            f"Consolidado — no fue posible estimar canales/cilindros requeridos: "
+                            + ", ".join(sin_rendimiento)
+                        )
+                except Exception as e:
+                    logger.error(f"Error calculando canales/cilindros requeridos: {str(e)}")
+                    st.warning("⚠️ No se pudieron calcular los canales/cilindros requeridos (rendimiento).")
+
                 # Mostrar tabla de frecuencias
                 st.dataframe(frecuencia_en_programa.set_index("Código Canal"), use_container_width=True)
                 
