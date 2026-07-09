@@ -336,22 +336,28 @@ def comparar_desbaste(df_desbaste, familia_a, familia_b):
 @st.cache_data
 def clasificar_cambios_codigo_canal(df_a, df_b):
     """
-    Clasifica, posición por posición (STD), los cambios de Código Canal entre
-    un producto origen (df_a) y un producto destino (df_b).
+    Clasifica, posición por posición (STD), los cambios entre un producto
+    origen (df_a) y un producto destino (df_b), distinguiendo dos motivos
+    de "Regulación":
 
-    Nueva lógica (reemplaza la comparación por sola posición):
-      1. Primero se determina si el código de canal de la posición en df_a
-         sigue existiendo en CUALQUIER posición de df_b (existencia global).
-      2. Solo después se decide la categoría:
-         - "Regulación": el código sigue existiendo en df_b (aunque cambie de
-           posición). Se reordena y calibra el mismo stand/código de canal;
-           NO corresponde cambio de stand.
-         - "Cambio completo": el código deja de existir por completo en df_b.
-           Corresponde reemplazar código de canal, guías, stand y elementos asociados.
+      A) El Código Canal cambia de posición pero sigue existiendo en el
+         producto destino (existencia global, no solo por posición):
+         "Regulación" — se reordena y calibra el mismo stand; NO corresponde
+         cambio de stand.
+      B) El Código Canal se mantiene igual en esa misma posición, pero algún
+         otro parámetro técnico (Material, Luz, guías, embudos, ángulos,
+         estabilización, etc.) cambia entre origen y destino: "Regulación" —
+         el stand no se reemplaza ni se reubica, pero sí requiere ajuste/
+         calibración por el cambio de condición.
+
+    Solo cuando el Código Canal deja de existir por completo en el producto
+    destino corresponde "Cambio completo" (reemplazar código de canal, guías,
+    stand y elementos asociados).
 
     Retorna (cambios_completos, regulaciones, detalle) donde detalle es una
-    lista de dicts con Posición, Código Origen, Código Destino y Categoría,
-    solo para las posiciones donde efectivamente hay una diferencia.
+    lista de dicts con Posición, Código Origen, Código Destino, Categoría y
+    Motivo, solo para las posiciones donde efectivamente hay una diferencia
+    (de código o de algún otro parámetro técnico).
     """
     detalle = []
     if (df_a.empty or df_b.empty
@@ -360,6 +366,13 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
         return 0, 0, detalle
 
     codigos_destino_existentes = set(df_b["Código Canal"].dropna())
+
+    # Columnas de parámetros técnicos a revisar cuando el código NO cambia
+    # (todo lo que no sea identificador de posición/producto ni el propio código)
+    columnas_parametros = [
+        col for col in df_a.columns
+        if col not in ("STD", "Producto", "Familia", "Código Canal") and col in df_b.columns
+    ]
 
     for _, row_a in df_a.iterrows():
         pos = row_a["STD"]
@@ -371,30 +384,56 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             # presentes en ambos productos.
             continue
 
-        codigo_b = matching_b.iloc[0]["Código Canal"]
+        fila_b = matching_b.iloc[0]
+        codigo_b = fila_b["Código Canal"]
 
-        # Sin cambio en esta posición
-        if pd.isna(codigo_a) and pd.isna(codigo_b):
-            continue
         try:
-            sin_cambio = codigo_a == codigo_b
+            mismo_codigo = (codigo_a == codigo_b) or (pd.isna(codigo_a) and pd.isna(codigo_b))
         except (TypeError, ValueError):
-            sin_cambio = str(codigo_a) == str(codigo_b)
-        if sin_cambio:
+            mismo_codigo = str(codigo_a) == str(codigo_b)
+
+        if mismo_codigo:
+            # El código no cambia: ¿cambia algún otro parámetro técnico en esta posición?
+            parametros_cambiados = []
+            for col in columnas_parametros:
+                val_a = row_a.get(col)
+                val_b = fila_b.get(col)
+                if (val_a is None or pd.isna(val_a)) and (val_b is None or pd.isna(val_b)):
+                    continue
+                try:
+                    cambia_param = val_a != val_b
+                except (TypeError, ValueError):
+                    cambia_param = str(val_a) != str(val_b)
+                if cambia_param:
+                    parametros_cambiados.append(str(col))
+
+            if not parametros_cambiados:
+                continue
+
+            detalle.append({
+                "Posición": pos,
+                "Código Origen": codigo_a if pd.notna(codigo_a) else "-",
+                "Código Destino": codigo_b if pd.notna(codigo_b) else "-",
+                "Categoría": "Regulación",
+                "Motivo": "Mismo código, cambia: " + ", ".join(parametros_cambiados)
+            })
             continue
 
-        # Hay diferencia en esta posición: ¿el stand de origen sigue existiendo
-        # en algún lugar del producto destino?
+        # El código de canal difiere en esta posición: ¿el stand de origen sigue
+        # existiendo en algún lugar del producto destino?
         if pd.notna(codigo_a) and codigo_a in codigos_destino_existentes:
             categoria = "Regulación"
+            motivo = "Código se reubica en otra posición"
         else:
             categoria = "Cambio completo"
+            motivo = "Código deja de existir en el producto destino"
 
         detalle.append({
             "Posición": pos,
             "Código Origen": codigo_a if pd.notna(codigo_a) else "-",
             "Código Destino": codigo_b if pd.notna(codigo_b) else "-",
-            "Categoría": categoria
+            "Categoría": categoria,
+            "Motivo": motivo
         })
 
     cambios_completos = sum(1 for d in detalle if d["Categoría"] == "Cambio completo")
