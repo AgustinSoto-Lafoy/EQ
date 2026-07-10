@@ -235,8 +235,8 @@ def comparar_productos(df_a, df_b, columnas):
             resumen.append({
                 "Posicion": pos,
                 "Componente": col,
-                "Valor A": val_a if not pd.isna(val_a) else "-",
-                "Valor B": val_b if not pd.isna(val_b) else "-",
+                "Valor A": str(val_a) if not pd.isna(val_a) else "-",
+                "Valor B": str(val_b) if not pd.isna(val_b) else "-",
                 "¿Cambia?": "✅ Sí" if cambia else "❌ No"
             })
     
