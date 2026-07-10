@@ -119,8 +119,10 @@ def _cruzar_programa_con_mapa(archivo_bytes):
     data_rows = all_rows[1:]
     df_prog = pd.DataFrame(data_rows, columns=headers)
 
-    # Filtrar filas que tengan al menos DESCRIPCIÓN no nula
-    df_prog = df_prog[df_prog["DESCRIPCIÓN"].notna()].copy()
+    # Cortar la secuencia en la primera fila con DESCRIPCIÓN vacía
+    if df_prog["DESCRIPCIÓN"].isna().any():
+        primera_vacia = df_prog["DESCRIPCIÓN"].isna().idxmax()
+        df_prog = df_prog.iloc[:primera_vacia].copy()
     df_prog.reset_index(drop=True, inplace=True)
 
     if df_prog.empty:
