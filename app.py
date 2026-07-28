@@ -21,6 +21,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # =====================================
+# CAPACIDAD DE STANDS
+# =====================================
+# Posiciones del tren de laminación. `DU` (desbaste) queda fuera a propósito:
+# no compite por los stands que el Equipo de Cambio monta y prepara.
+POSICIONES_LINEA = ("M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6")
+
+# Valores iniciales del panel de capacidad; todos editables en la app.
+TOTAL_STANDS_DEFAULT = 22
+EN_MANTENCION_DEFAULT = 2
+HORAS_PREP_STAND_DEFAULT = 2.0
+
+# Dotación del taller: en cuántos stands se puede trabajar A LA VEZ. Es una
+# restricción distinta de los stands disponibles (cuántos hay): tener 12 stands
+# en taller no significa poder prepararlos los 12 simultáneamente.
+PREPARACIONES_SIMULTANEAS_DEFAULT = 4
+
+# Holgura bajo la cual un cambio se marca como ajustado en vez de holgado.
+HOLGURA_AJUSTADA_H = 1.5
+
+# =====================================
 # FUNCIONES DE CARGA DE DATOS
 # =====================================
 
@@ -511,9 +531,123 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             "Motivo": motivo
         })
 
-    cambios_completos = sum(1 for d in detalle if d["Categoría"] == "Cambio completo")
-    regulaciones = sum(1 for d in detalle if d["Categoría"] == "Regulación")
+    # Los conteos cubren solo las posiciones del tren (POSICIONES_LINEA). `DU`
+    # sigue apareciendo en el detalle porque el operador necesita verlo, pero no
+    # se cuenta: es desbaste y no compite por los stands del tren.
+    en_linea = [d for d in detalle if d["Posición"] in POSICIONES_LINEA]
+    cambios_completos = sum(1 for d in en_linea if d["Categoría"] == "Cambio completo")
+    regulaciones = sum(1 for d in en_linea if d["Categoría"] == "Regulación")
     return cambios_completos, regulaciones, detalle
+
+
+def stands_montados(df_ddp, producto):
+    """Stands que este producto ocupa físicamente en el tren.
+
+    No son siempre 10: un pase falso (`F`) deja la posición vacía, y ese stand
+    queda libre para que el Equipo de Cambio lo prepare. Va de 6 a 10 según el
+    producto. Devuelve None si el producto no está en el DDP.
+    """
+    if df_ddp is None or df_ddp.empty or "Producto" not in df_ddp.columns:
+        return None
+    g = df_ddp[(df_ddp["Producto"] == producto) & (df_ddp["STD"].isin(POSICIONES_LINEA))]
+    if g.empty:
+        return None
+    reales = g[~g["Código Canal"].apply(_es_pase_falso)]
+    return int(reales["STD"].nunique())
+
+
+def stands_a_montar(detalle):
+    """A partir del detalle de un cambio, separa montajes de liberaciones.
+
+    Un "Cambio completo" cuyo código destino es `F` NO es un montaje: esa
+    posición queda vacía en el producto destino, así que el stand se libera en
+    vez de consumirse. Contarlo como montaje infla la necesidad de taller.
+    """
+    montar = liberar = 0
+    for d in detalle or []:
+        if d["Posición"] not in POSICIONES_LINEA or d["Categoría"] != "Cambio completo":
+            continue
+        if _es_pase_falso(d["Código Destino"]):
+            liberar += 1
+        else:
+            montar += 1
+    return montar, liberar
+
+
+def horas_preparacion(n_montar, puestos, horas_por_stand):
+    """Horas de taller para dejar listos `n_montar` stands.
+
+    Se preparan en tandas del tamaño de los puestos disponibles: con 4 puestos y
+    2 h por stand, 10 stands son 3 tandas = 6 h.
+    """
+    if not n_montar:
+        return 0.0
+    puestos = max(1, int(puestos or 1))
+    return math.ceil(n_montar / puestos) * float(horas_por_stand)
+
+
+def evaluar_capacidad_cambio(disponibles, montar, horas_bloque, puestos, horas_por_stand):
+    """Decide si el cambio se puede dejar preparado. Devuelve (estado, motivo).
+
+    Estados: "No evaluable" · "OK" · "Ajustado" · "Sin stands" · "Sin tiempo".
+    `horas_bloque` es el tiempo de laminación del producto de origen, es decir
+    la ventana real para preparar. Si el programa no trae horas, la restricción
+    de tiempo no se evalúa y se dice explícitamente.
+    """
+    if disponibles is None or montar is None:
+        return "No evaluable", "Falta homologación o datos de diagrama de pase"
+
+    if montar == 0:
+        return "OK", "Sin montajes: solo regulación en línea"
+
+    if disponibles < montar:
+        faltan = montar - disponibles
+        return "Sin stands", f"Faltan {faltan} stand(s): se necesitan {montar} y hay {disponibles}"
+
+    h_prep = horas_preparacion(montar, puestos, horas_por_stand)
+    puestos = max(1, int(puestos or 1))
+    tandas = math.ceil(montar / puestos)
+    # Cómo se llega a las horas: hacerlo explícito evita que el número parezca salido de la nada.
+    calculo = (f"{montar} stand(s) ÷ {puestos} simultáneo(s) = {tandas} tanda(s) × "
+               f"{horas_por_stand:g} h = {h_prep:.1f} h")
+
+    if horas_bloque is None or pd.isna(horas_bloque):
+        return "OK", (f"{calculo}. Hay {disponibles} stand(s) disponibles. "
+                      f"El programa no trae horas de bloque para contrastar el tiempo")
+
+    if h_prep > horas_bloque:
+        return "Sin tiempo", (f"{calculo}, pero el bloque dura {horas_bloque:.1f} h: "
+                              f"faltan {h_prep - horas_bloque:.1f} h")
+
+    holgura = horas_bloque - h_prep
+    detalle = (f"{calculo} sobre un bloque de {horas_bloque:.1f} h; "
+               f"sobran {holgura:.1f} h y {disponibles - montar} stand(s)")
+    if holgura < HOLGURA_AJUSTADA_H:
+        return "Ajustado", detalle
+    return "OK", detalle
+
+
+def horas_por_bloque(df_prog):
+    """Horas de laminación de cada bloque, indexadas por el N° de grupo.
+
+    Usa INICIO/FIN del programa. Devuelve None si el archivo no las trae — no
+    todos los programas las tienen y la app no debe caerse por eso.
+    """
+    if df_prog is None or not {"INICIO", "FIN"}.issubset(df_prog.columns):
+        return None
+    try:
+        d = df_prog.loc[:, ~df_prog.columns.duplicated()].copy()
+        d["_ini"] = pd.to_datetime(d["INICIO"], errors="coerce")
+        d["_fin"] = pd.to_datetime(d["FIN"], errors="coerce")
+        if d["_ini"].isna().all() or d["_fin"].isna().all():
+            return None
+        d["_grupo"] = (d["Nombre STD"] != d["Nombre STD"].shift()).cumsum()
+        bloques = d.groupby("_grupo").agg(ini=("_ini", "min"), fin=("_fin", "max"))
+        horas = (bloques["fin"] - bloques["ini"]).dt.total_seconds() / 3600
+        return horas.to_dict()
+    except Exception as e:
+        logger.error(f"Error calculando horas por bloque: {str(e)}")
+        return None
 
 
 @st.cache_data
@@ -561,7 +695,14 @@ def agrupar_cambios_consecutivos(df):
             "Producto Destino": "first",
             "Tiempo estimado": "first",
             "Cambios Completo": "first",
-            "Regulaciones": "first"
+            "Regulaciones": "first",
+            # Capacidad de stands: si no se listan aquí, el groupby las descarta
+            "Disponibles": "first",
+            "A Montar": "first",
+            "Libera": "first",
+            "Horas Bloque": "first",
+            "Estado": "first",
+            "Motivo": "first"
         }
         
         for col, func in columnas_posibles.items():
@@ -890,18 +1031,67 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
     try:
         df_prog = st.session_state.df_prog
         st.markdown(f"**Programa cargado:** {len(df_prog)} registros")
-        
+
+        # --- Capacidad de taller (editable) ---
+        with st.expander("⚙️ Capacidad de stands", expanded=False):
+            st.markdown(
+                "El análisis cruza **dos restricciones distintas**:\n\n"
+                "- **¿Tengo los stands?** Los disponibles no son un número fijo: se calculan como "
+                "`total − mantención − los que ocupa el producto en línea`. Un producto con pases "
+                "falsos ocupa menos de 10 posiciones, así que **libera** stands para montaje "
+                "(van de 10 a 14 según el producto).\n"
+                "- **¿Alcanza el tiempo?** Depende de la **dotación del taller** —en cuántos stands "
+                "se puede trabajar a la vez— y de las horas del bloque que se está laminando, que "
+                "es la ventana real para preparar el cambio siguiente."
+            )
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                total_stands = st.number_input(
+                    "Total de stands", min_value=1, max_value=99,
+                    value=TOTAL_STANDS_DEFAULT, step=1,
+                    help="Parque completo de stands de la planta."
+                )
+            with c2:
+                en_mantencion = st.number_input(
+                    "En mantención", min_value=0, max_value=99,
+                    value=EN_MANTENCION_DEFAULT, step=1,
+                    help="Fuera de servicio. Varía; ajústalo a la situación real."
+                )
+            with c3:
+                puestos_taller = st.number_input(
+                    "Preparaciones simultáneas", min_value=1, max_value=20,
+                    value=PREPARACIONES_SIMULTANEAS_DEFAULT, step=1,
+                    help="Dotación del taller: en cuántos stands puede trabajar el equipo AL MISMO "
+                         "TIEMPO. No es lo mismo que los stands disponibles (cuántos hay): con 12 "
+                         "stands en taller y dotación para 4, se preparan en 3 tandas."
+                )
+            with c4:
+                horas_prep = st.number_input(
+                    "Horas por stand", min_value=0.5, max_value=48.0,
+                    value=HORAS_PREP_STAND_DEFAULT, step=0.5,
+                    help="Desmontar, cambiar canal y guías, calibrar."
+                )
+
+        # Horas de laminación de cada bloque: la ventana real para preparar.
+        horas_bloques = horas_por_bloque(df_prog)
+        if horas_bloques is None:
+            st.info(
+                "ℹ️ El programa no trae columnas `INICIO`/`FIN`, así que no se puede evaluar "
+                "si alcanza el **tiempo** para preparar. Se evalúa solo la disponibilidad de stands."
+            )
+        grupos_prog = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
+
         with st.spinner("Analizando secuencia de cambios..."):
             resumen = []
-            
+
             for i in range(len(df_prog) - 1):
                 origen = df_prog.loc[i, "Nombre STD"]
                 destino = df_prog.loc[i + 1, "Nombre STD"]
-                
+
                 # Skip si es el mismo producto
                 if origen == destino:
                     continue
-                
+
                 # Obtener tiempo de cambio
                 tiempo = obtener_tiempo_cambio(df_tiempo, origen, destino)
                 
@@ -910,15 +1100,31 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 # en el producto destino; si se reubica en otra posición, es Regulación)
                 cambios_completos = 0
                 regulaciones = 0
+                montar = liberar = None
                 try:
                     df_a = df_ddp[df_ddp["Producto"] == origen]
                     df_b = df_ddp[df_ddp["Producto"] == destino]
 
                     if not df_a.empty and not df_b.empty and "Código Canal" in df_a.columns:
-                        cambios_completos, regulaciones, _ = clasificar_cambios_codigo_canal(df_a, df_b)
+                        cambios_completos, regulaciones, detalle_cap = clasificar_cambios_codigo_canal(df_a, df_b)
+                        montar, liberar = stands_a_montar(detalle_cap)
                 except Exception as e:
                     logger.error(f"Error calculando cambios código canal: {str(e)}")
-                
+
+                # --- Capacidad: ¿se puede dejar montado este cambio? ---
+                try:
+                    ocupados = stands_montados(df_ddp, origen)
+                    disponibles = None if ocupados is None else int(total_stands) - int(en_mantencion) - ocupados
+                    h_bloque = horas_bloques.get(grupos_prog.iloc[i]) if horas_bloques else None
+                    estado, motivo = evaluar_capacidad_cambio(
+                        disponibles, montar, h_bloque, puestos_taller, horas_prep
+                    )
+                except Exception as e:
+                    logger.error(f"Error evaluando capacidad de stands: {str(e)}")
+                    disponibles, h_bloque = None, None
+                    estado, motivo = "No evaluable", "Error al evaluar la capacidad"
+
+
                 # Obtener familias
                 try:
                     familia_origen = df_ddp[df_ddp["Producto"] == origen]['Familia'].iloc[0] if not df_ddp[df_ddp["Producto"] == origen].empty else "N/A"
@@ -934,7 +1140,13 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                     "Producto Destino": destino,
                     "Tiempo estimado": tiempo,
                     "Cambios Completo": cambios_completos,
-                    "Regulaciones": regulaciones
+                    "Regulaciones": regulaciones,
+                    "Disponibles": disponibles,
+                    "A Montar": montar,
+                    "Libera": liberar,
+                    "Horas Bloque": h_bloque,
+                    "Estado": estado,
+                    "Motivo": motivo
                 })
         
         if not resumen:
@@ -958,7 +1170,84 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 st.metric("Tiempo Promedio/Cambio", f"{tiempo_total/cambios_totales:.1f} min" if tiempo_total > 0 and cambios_totales > 0 else "N/A")
         except Exception as e:
             logger.error(f"Error mostrando métricas secuencia: {str(e)}")
-        
+
+        # --- Capacidad de stands a lo largo del programa ---
+        try:
+            if "Estado" in df_resumen.columns:
+                st.markdown("---")
+                st.markdown("### Capacidad de Stands")
+
+                conteo = df_resumen["Estado"].value_counts()
+                criticos = df_resumen[df_resumen["Estado"].isin(["Sin stands", "Sin tiempo"])]
+                ajustados = df_resumen[df_resumen["Estado"] == "Ajustado"]
+                no_eval = df_resumen[df_resumen["Estado"] == "No evaluable"]
+
+                # Horizonte: cuántos cambios seguidos alcanzan a dejarse montados
+                # con los stands libres al inicio, antes de reponer.
+                horizonte = 0
+                acumulado = 0
+                disp_inicial = None
+                for _, fila in df_resumen.iterrows():
+                    if pd.isna(fila.get("Disponibles")) or pd.isna(fila.get("A Montar")):
+                        break
+                    if disp_inicial is None:
+                        disp_inicial = int(fila["Disponibles"])
+                    acumulado += int(fila["A Montar"])
+                    if acumulado > disp_inicial:
+                        break
+                    horizonte += 1
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if disp_inicial is not None:
+                        st.metric("Horizonte de montaje", f"{horizonte} cambio(s)",
+                                  help=f"Cuántos cambios seguidos alcanzas a dejar montados "
+                                       f"con los {disp_inicial} stands libres al inicio, sin reponer.")
+                    else:
+                        st.metric("Horizonte de montaje", "N/A")
+                with c2:
+                    st.metric("Cambios críticos", len(criticos),
+                              help="Sin stands suficientes o sin tiempo para prepararlos.")
+                with c3:
+                    st.metric("Margen ajustado", len(ajustados),
+                              help=f"Alcanzan por menos de {HOLGURA_AJUSTADA_H:.1f} h.")
+
+                if not criticos.empty:
+                    lineas = [
+                        f"- **Cambio #{int(f['Secuencia'])}** · {f['Producto Origen']} → "
+                        f"{f['Producto Destino']} — {f['Estado']}: {f['Motivo']}"
+                        for _, f in criticos.iterrows()
+                    ]
+                    st.error("🔴 **Cambios que no se pueden dejar preparados:**\n" + "\n".join(lineas))
+
+                if not ajustados.empty:
+                    lineas = [
+                        f"- **Cambio #{int(f['Secuencia'])}** · {f['Producto Origen']} → "
+                        f"{f['Producto Destino']} — {f['Motivo']}"
+                        for _, f in ajustados.iterrows()
+                    ]
+                    st.warning("🟡 **Margen ajustado (alcanza, pero sin holgura):**\n" + "\n".join(lineas))
+
+                if not no_eval.empty:
+                    st.info(
+                        f"ℹ️ {len(no_eval)} cambio(s) no evaluable(s) por falta de homologación en el "
+                        "Mapa o de diagrama de pase. Un producto sin homologar ciega también los "
+                        "cambios vecinos: corregirlo en el Mapa maestro recupera esa visibilidad."
+                    )
+
+                columnas_cap = [c for c in ["Secuencia", "Producto Origen", "Producto Destino",
+                                            "Disponibles", "A Montar", "Libera", "Horas Bloque",
+                                            "Estado", "Motivo"] if c in df_resumen.columns]
+                tabla_cap = df_resumen[columnas_cap].copy()
+                if "Horas Bloque" in tabla_cap.columns:
+                    tabla_cap["Horas Bloque"] = tabla_cap["Horas Bloque"].map(
+                        lambda v: f"{v:.1f}" if pd.notna(v) else "—"
+                    )
+                st.dataframe(tabla_cap, width="stretch", hide_index=True)
+        except Exception as e:
+            logger.error(f"Error mostrando capacidad de stands: {str(e)}")
+            st.warning("⚠️ No se pudo calcular la capacidad de stands.")
+
         # Mostrar cambios detallados
         st.markdown("---")
         st.markdown("### Detalle de Cambios en Secuencia")
@@ -984,9 +1273,41 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 origen = fila.get('Producto Origen', 'N/A')
                 destino = fila.get('Producto Destino', 'N/A')
                 
-                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | {cambios_completos_fila} cambio(s) completo(s) | {regulaciones_fila} regulación(es)"
-                
+                estado_fila = fila.get("Estado")
+                icono_estado = {
+                    "OK": "🟢", "Ajustado": "🟡",
+                    "Sin stands": "🔴", "Sin tiempo": "🔴", "No evaluable": "⚪"
+                }.get(estado_fila, "")
+                sufijo_estado = f" | {icono_estado} {estado_fila}" if estado_fila else ""
+
+                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | {cambios_completos_fila} cambio(s) completo(s) | {regulaciones_fila} regulación(es){sufijo_estado}"
+
                 with st.expander(titulo):
+                    if estado_fila:
+                        montar_fila = fila.get("A Montar")
+                        libera_fila = fila.get("Libera")
+                        disp_fila = fila.get("Disponibles")
+                        resumen_cap = f"**{estado_fila}** — {fila.get('Motivo', '')}"
+                        if estado_fila in ("Sin stands", "Sin tiempo"):
+                            st.error(resumen_cap)
+                        elif estado_fila == "Ajustado":
+                            st.warning(resumen_cap)
+                        elif estado_fila == "No evaluable":
+                            st.info(resumen_cap)
+                        else:
+                            st.success(resumen_cap)
+
+                        if pd.notna(montar_fila):
+                            m1, m2, m3 = st.columns(3)
+                            with m1:
+                                st.metric("Stands disponibles",
+                                          int(disp_fila) if pd.notna(disp_fila) else "—")
+                            with m2:
+                                st.metric("A montar", int(montar_fila))
+                            with m3:
+                                st.metric("Libera (pase falso)",
+                                          int(libera_fila) if pd.notna(libera_fila) else 0)
+
                     df_a_cmp = df_ddp[df_ddp["Producto"] == origen]
                     df_b_cmp = df_ddp[df_ddp["Producto"] == destino]
                     
@@ -996,6 +1317,12 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                             if detalle_stand:
                                 st.markdown("**Clasificación de cambios de stand (Código Canal):**")
                                 st.dataframe(pd.DataFrame(detalle_stand), width="stretch", hide_index=True)
+                                if any(d["Posición"] not in POSICIONES_LINEA for d in detalle_stand):
+                                    st.caption(
+                                        "`DU` (desbaste) se muestra pero no se cuenta: no compite por "
+                                        "los stands del tren. Un destino `F` es pase falso — esa posición "
+                                        "queda vacía, así que libera un stand en vez de consumirlo."
+                                    )
 
                         columnas_cmp = [col for col in df_a_cmp.columns if col not in ["STD", "Producto", "Familia"]]
                         resumen_cmp = comparar_productos(df_a_cmp, df_b_cmp, columnas_cmp)
