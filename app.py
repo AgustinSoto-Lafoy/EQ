@@ -24,6 +24,55 @@ logger = logging.getLogger(__name__)
 # FUNCIONES DE CARGA DE DATOS
 # =====================================
 
+# Las hojas del Consolidado se ubican por CONTENIDO, no por posición.
+# Leerlas por índice (`sheet_names[1]`) fallaba en silencio: bastaba insertar una
+# hoja cualquiera para que se cargara la equivocada sin excepción ni error. El
+# síntoma era engañoso — el aviso de Maestranza pasaba a listar los 71 códigos como
+# "sin rendimiento registrado en el Consolidado" y ninguno estimaba cilindros —,
+# culpando al dato cuando el dato estaba bien y el problema era qué hoja se leyó.
+
+
+def _columnas_normalizadas(columnas):
+    return [str(c).strip().lower() for c in columnas]
+
+
+def _es_hoja_rendimientos(columnas):
+    """Hoja de rendimientos: un código de canal y una columna de rendimiento.
+
+    Usa los mismos criterios que `calcular_rango_rendimiento` para ubicar sus
+    columnas, de modo que detector y consumidor no puedan divergir. El DDP tiene
+    'Código Canal' pero no 'Rendimiento', así que no puede confundirse con esta.
+    """
+    cols = _columnas_normalizadas(columnas)
+    tiene_codigo = any(c in ("código canal", "codigo canal") for c in cols)
+    tiene_rendimiento = any("rendimiento" in c for c in cols)
+    return tiene_codigo and tiene_rendimiento
+
+
+def _es_hoja_ddp(columnas):
+    """Hoja de diagramas de pase: 1 fila ≈ 1 pase (Producto × STD)."""
+    cols = _columnas_normalizadas(columnas)
+    tiene_codigo = any(c in ("código canal", "codigo canal") for c in cols)
+    return "producto" in cols and "std" in cols and tiene_codigo
+
+
+def _buscar_hoja(ruta, criterio):
+    """Primera hoja de `ruta` cuyas columnas cumplen `criterio`.
+
+    Devuelve `(nombre_hoja, df, hojas_disponibles)`; `(None, None, hojas)` si
+    ninguna califica. No hay respaldo por posición a propósito: desactivar la
+    funcionalidad con un aviso explícito es preferible a cargar la hoja
+    equivocada y entregar resultados que parecen válidos.
+    """
+    xls = pd.ExcelFile(ruta)
+    hojas = list(xls.sheet_names)
+    for hoja in hojas:
+        encabezado = pd.read_excel(xls, sheet_name=hoja, nrows=0)
+        if criterio(encabezado.columns):
+            return hoja, pd.read_excel(xls, sheet_name=hoja), hojas
+    return None, None, hojas
+
+
 @st.cache_data(ttl=3600)  # Cache por 1 hora
 def cargar_datos():
     """Carga los archivos base de datos necesarios para la aplicación."""
@@ -38,7 +87,19 @@ def cargar_datos():
     
     for key, archivo in archivos.items():
         try:
-            df = pd.read_excel(archivo)
+            if key == "ddp":
+                # El DDP también se ubica por contenido: una hoja insertada al
+                # inicio haría que la app leyera cualquier cosa como diagrama de pases.
+                hoja_ddp, df, hojas = _buscar_hoja(archivo, _es_hoja_ddp)
+                if df is None:
+                    raise ValueError(
+                        "no se encontró la hoja de diagramas de pase (se esperaba una hoja con "
+                        "columnas 'Producto', 'STD' y 'Código Canal'). "
+                        f"Hojas encontradas: {', '.join(hojas)}"
+                    )
+                logger.info(f"Hoja de diagramas de pase detectada: '{hoja_ddp}'")
+            else:
+                df = pd.read_excel(archivo)
             # Optimizar tipos de datos básico
             # 'str' explícito: desde pandas 3 las columnas de texto son dtype 'str', e incluirlas
             # vía 'object' es retrocompatibilidad que pandas 4 retira. Sin esto, la conversión a
@@ -56,17 +117,22 @@ def cargar_datos():
             errores.append(f"Error cargando {archivo}: {str(e)}")
             logger.error(f"Error cargando {archivo}: {str(e)}")
 
-    # --- Rendimientos: segunda hoja del Consolidado_Laminador ---
-    # Fuente adicional (no reemplaza la lectura anterior, que solo toma la primera
-    # hoja del Consolidado como DDP). Si falla, no bloquea el resto de la app.
+    # --- Rendimientos: hoja del Consolidado ubicada por contenido ---
+    # Fuente adicional (no reemplaza la lectura anterior, que toma la hoja de
+    # diagramas de pase). Si falla, no bloquea el resto de la app.
     df_rendimiento = None
+    hojas_consolidado = []
     try:
-        hojas_consolidado = pd.ExcelFile(archivos["ddp"]).sheet_names
-        if len(hojas_consolidado) >= 2:
-            df_rendimiento = pd.read_excel(archivos["ddp"], sheet_name=hojas_consolidado[1])
-            logger.info(f"Hoja de rendimientos '{hojas_consolidado[1]}' cargada exitosamente")
+        hoja_rend, df_rendimiento, hojas_consolidado = _buscar_hoja(
+            archivos["ddp"], _es_hoja_rendimientos
+        )
+        if df_rendimiento is not None:
+            logger.info(f"Hoja de rendimientos detectada: '{hoja_rend}'")
         else:
-            logger.warning("El Consolidado_Laminador no tiene una segunda hoja con rendimientos.")
+            logger.warning(
+                "Ninguna hoja del Consolidado tiene columnas de código de canal y rendimiento. "
+                f"Hojas encontradas: {', '.join(hojas_consolidado)}"
+            )
     except Exception as e:
         logger.error(f"Error cargando hoja de rendimientos: {str(e)}")
 
@@ -75,8 +141,12 @@ def cargar_datos():
         return None, None, None, None
 
     if df_rendimiento is None:
-        st.warning("⚠️ No se pudo cargar la hoja de rendimientos del Consolidado (segunda hoja). "
-                    "Los cálculos de canales/cilindros requeridos no estarán disponibles.")
+        detalle = f" Hojas encontradas: {', '.join(hojas_consolidado)}." if hojas_consolidado else ""
+        st.warning(
+            "⚠️ No se encontró la hoja de rendimientos dentro del Consolidado: ninguna hoja tiene "
+            "a la vez una columna de código de canal y una de rendimiento." + detalle +
+            " Los cálculos de canales/cilindros requeridos no estarán disponibles."
+        )
 
     return datos.get("ddp"), datos.get("tiempo"), datos.get("desbaste"), df_rendimiento
 
