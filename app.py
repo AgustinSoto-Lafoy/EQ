@@ -40,7 +40,10 @@ def cargar_datos():
         try:
             df = pd.read_excel(archivo)
             # Optimizar tipos de datos básico
-            for col in df.select_dtypes(include=['object']).columns:
+            # 'str' explícito: desde pandas 3 las columnas de texto son dtype 'str', e incluirlas
+            # vía 'object' es retrocompatibilidad que pandas 4 retira. Sin esto, la conversión a
+            # 'category' dejaría de aplicarse en silencio.
+            for col in df.select_dtypes(include=['object', 'str']).columns:
                 if df[col].nunique() / len(df) < 0.5:  # Solo si tiene sentido
                     try:
                         df[col] = df[col].astype('category')
@@ -182,7 +185,7 @@ def cargar_programa_usuario():
                                 st.warning("Estos productos fueron cargados pero **no tienen Nombre STD**. No podrán usarse en comparaciones hasta que se agreguen al Mapa.")
                                 st.dataframe(
                                     pd.DataFrame({"DESCRIPCIÓN sin match en Mapa": sin_match}),
-                                    use_container_width=True,
+                                    width="stretch",
                                     hide_index=True
                                 )
 
@@ -735,12 +738,12 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                     else:
                         st.dataframe(
                             resumen_filtrado.style.apply(resaltar_cambios, axis=1),
-                            use_container_width=True
+                            width="stretch"
                         )
                 else:
                     st.dataframe(
                         resumen_ddp.style.apply(resaltar_cambios, axis=1),
-                        use_container_width=True
+                        width="stretch"
                     )
         
         # Comparación desbaste
@@ -767,12 +770,12 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                 else:
                     st.dataframe(
                         desbaste_filtrado.style.apply(resaltar_cambios, axis=1),
-                        use_container_width=True
+                        width="stretch"
                     )
             else:
                 st.dataframe(
                     df_desbaste_cmp.style.apply(resaltar_cambios, axis=1),
-                    use_container_width=True
+                    width="stretch"
                 )
         else:
             st.info("ℹ️ No se encontraron datos de desbaste para comparar.")
@@ -800,7 +803,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             )
 
             if not resumen_componentes.empty:
-                st.dataframe(resumen_componentes, use_container_width=True, hide_index=True)
+                st.dataframe(resumen_componentes, width="stretch", hide_index=True)
             else:
                 st.success("✅ No se registraron cambios en ningún componente.")
         else:
@@ -922,7 +925,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                             _, _, detalle_stand = clasificar_cambios_codigo_canal(df_a_cmp, df_b_cmp)
                             if detalle_stand:
                                 st.markdown("**Clasificación de cambios de stand (Código Canal):**")
-                                st.dataframe(pd.DataFrame(detalle_stand), use_container_width=True, hide_index=True)
+                                st.dataframe(pd.DataFrame(detalle_stand), width="stretch", hide_index=True)
 
                         columnas_cmp = [col for col in df_a_cmp.columns if col not in ["STD", "Producto", "Familia"]]
                         resumen_cmp = comparar_productos(df_a_cmp, df_b_cmp, columnas_cmp)
@@ -931,7 +934,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                             resumen_cmp_cambios = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
                             
                             if not resumen_cmp_cambios.empty:
-                                st.dataframe(resumen_cmp_cambios, use_container_width=True)
+                                st.dataframe(resumen_cmp_cambios, width="stretch")
                             else:
                                 st.success("✅ No hay cambios técnicos para este cambio de producto")
                         else:
@@ -1300,7 +1303,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                     st.error(f"**{len(productos_sin_ddp)} producto(s) no encontrados en DDP** — columnas M1–A6 vacías y sin datos en frecuencia de cilindros. Verifica que el nombre STD coincida exactamente con el Consolidado_Laminador.")
                     st.dataframe(
                         pd.DataFrame({"Producto sin datos en DDP": productos_sin_ddp}),
-                        use_container_width=True, hide_index=True
+                        width="stretch", hide_index=True
                     )
 
                 if productos_solo_nulos:
@@ -1309,7 +1312,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                     st.warning(f"**{len(productos_solo_nulos)} producto(s) excluidos por PROGR vacío** — aparecen en el programa solo con tonelaje en blanco. Si deben producirse, corrige el programa.")
                     st.dataframe(
                         pd.DataFrame({"Producto excluido (PROGR vacío)": productos_solo_nulos}),
-                        use_container_width=True, hide_index=True
+                        width="stretch", hide_index=True
                     )
 
                 if audit_posiciones:
@@ -1318,14 +1321,14 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                     st.warning(f"**{len(audit_posiciones)} producto(s) con posiciones M1–A6 sin Código Canal** — puede ser intencional si la posición no se usa, o un dato faltante en el DDP.")
                     st.dataframe(
                         pd.DataFrame(audit_posiciones),
-                        use_container_width=True, hide_index=True
+                        width="stretch", hide_index=True
                     )
         else:
             st.success("✅ Sin inconsistencias — todos los productos tienen datos completos.")
 
         # Tabla principal
         st.markdown("### Resumen Detallado por Producto")
-        st.dataframe(df_resumen, use_container_width=True)
+        st.dataframe(df_resumen, width="stretch")
         
         # ===============================================
         # SECCIÓN DE FRECUENCIA DE CILINDROS
@@ -1388,7 +1391,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                     st.warning("⚠️ No se pudieron calcular los canales/cilindros requeridos (rendimiento).")
 
                 # Mostrar tabla de frecuencias
-                st.dataframe(frecuencia_en_programa.set_index("Código Canal"), use_container_width=True)
+                st.dataframe(frecuencia_en_programa.set_index("Código Canal"), width="stretch")
                 
                 # Mostrar métricas de cilindros
                 col1, col2, col3 = st.columns(3)
@@ -1668,7 +1671,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
             
             st.dataframe(
                 df_cambios.style.apply(colorear_cambios, axis=1),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
             
@@ -1733,7 +1736,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                st.dataframe(frecuencia_comp, use_container_width=True, hide_index=True)
+                st.dataframe(frecuencia_comp, width="stretch", hide_index=True)
             
             with col2:
                 # Métricas del componente
@@ -1769,7 +1772,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
         
         if resumen_utilaje:
             df_resumen_utilaje = pd.DataFrame(resumen_utilaje)
-            st.dataframe(df_resumen_utilaje, use_container_width=True, hide_index=True)
+            st.dataframe(df_resumen_utilaje, width="stretch", hide_index=True)
         
         # Botón de exportación
         st.markdown("---")
@@ -1928,7 +1931,7 @@ def mostrar_utilaje_producto(df_ddp, producto, componentes_disponibles, mostrar_
             
             st.dataframe(
                 df_utilaje.style.apply(resaltar_multiples, axis=1),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
             
@@ -2011,7 +2014,7 @@ def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_dispo
             
             st.dataframe(
                 df_comparacion.style.apply(resaltar_diferencias, axis=1),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
             
@@ -2051,7 +2054,7 @@ def mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles):
                     frecuencias.columns = ["Valor", "Frecuencia"]
                     frecuencias["Porcentaje"] = (frecuencias["Frecuencia"] / frecuencias["Frecuencia"].sum() * 100).round(1)
                     
-                    st.dataframe(frecuencias, use_container_width=True, hide_index=True)
+                    st.dataframe(frecuencias, width="stretch", hide_index=True)
                     
                     # Mostrar métricas del componente
                     col1, col2, col3 = st.columns(3)
@@ -2103,7 +2106,7 @@ def mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles):
         
         st.dataframe(
             df_resumen.style.apply(colorear_cobertura, axis=1),
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
         
