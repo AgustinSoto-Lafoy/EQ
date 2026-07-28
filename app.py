@@ -1015,19 +1015,44 @@ def _exportar_maestranza_xlsx(df_resumen, df_frecuencia, df_prog_completo):
     return buf
 
 
+# Sufijos que indican moleteado, ordenados de más largo a más corto para que la
+# sustitución no corte una variante por la mitad. El DDP escribe 'CP 23 Mol',
+# 'PL Molet.' u 'OP 4209 MLTDO'; la hoja de rendimientos escribe siempre 'CP 23 M'.
+_SUFIJOS_MOLETEADO = ("MOLETEADO", "MOLET", "MLTDO", "MOL")
+
+# 'F' = pase falso: el pase va vacío. No es un código de canal — no hay geometría,
+# no consume canales ni cilindros — por lo que queda fuera del cálculo de
+# canales/cilindros requeridos. Sí se muestra en el diagrama de pases, donde
+# significa justamente que esa posición no se usa.
+_CODIGOS_PASE_FALSO = {"F"}
+
+
 def _normalizar_codigo_canal(valor):
     """
     Normaliza un código de canal para cruzarlo entre archivos con distinta
     escritura (espacios, guiones, comas, mayúsculas/minúsculas). Se usa
     únicamente como clave interna de cruce; en pantalla siempre se muestra
     el código tal como aparece en el DDP/Programa.
+
+    El sufijo de moleteado se unifica a 'M'. La distinción sí importa: 'CP 23' y
+    'CP 23 M' son canales distintos —el segundo lleva moleteado, un proceso
+    posterior al mecanizado que trabaja la superficie del canal para mejorar el
+    agarre—, por lo que solo se unifica la GRAFÍA del sufijo; nunca se elimina.
     """
     if pd.isna(valor):
         return None
     s = str(valor).strip().upper()
     for ch in (" ", "-", ".", ","):
         s = s.replace(ch, "")
+    for sufijo in _SUFIJOS_MOLETEADO:
+        if s.endswith(sufijo):
+            return s[:-len(sufijo)] + "M"
     return s
+
+
+def _es_pase_falso(valor):
+    """True si el código corresponde a un pase falso (pase vacío, sin canal)."""
+    return _normalizar_codigo_canal(valor) in _CODIGOS_PASE_FALSO
 
 
 @st.cache_data
@@ -1068,6 +1093,16 @@ def calcular_rango_rendimiento(df_rendimiento):
         return pd.DataFrame(columns=columnas_salida)
 
     df["_codigo_norm"] = df[col_codigo].apply(_normalizar_codigo_canal)
+
+    # El rendimiento y el N° de canales deben ser numéricos: más abajo se dividen.
+    # La hoja trae celdas con anotaciones de texto (p. ej. '600 (200 en A&B)') que
+    # no se pueden interpretar sin ambigüedad. Se descartan en vez de adivinar un
+    # valor: el código queda como "sin rendimiento" y aparece en el aviso de la
+    # pestaña Maestranza, para que se corrija en la fuente.
+    df[col_rend] = pd.to_numeric(df[col_rend], errors="coerce")
+    if col_ncanales:
+        df[col_ncanales] = pd.to_numeric(df[col_ncanales], errors="coerce")
+
     df = df.dropna(subset=["_codigo_norm", col_rend])
 
     filas = []
@@ -1309,6 +1344,10 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                 if "Código Canal" in df_ddp.columns:
                     codigos_producto = df_ddp[df_ddp["Producto"] == producto]["Código Canal"].dropna().unique()
                     for codigo in codigos_producto:
+                        # Los pases falsos no son canales: no se cuentan como cilindro
+                        # ni se les pide rendimiento.
+                        if _es_pase_falso(codigo):
+                            continue
                         codigos_programa.append({
                             "Nombre STD": producto,
                             "Código Canal": codigo,
