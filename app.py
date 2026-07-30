@@ -793,15 +793,15 @@ def mostrar_metricas_resumen(df_cambios):
         if not df_cambios.empty and "¿Cambia?" in df_cambios.columns:
             total_cambios = len(df_cambios[df_cambios["¿Cambia?"] == "Sí"])
             total_componentes = len(df_cambios)
-            porcentaje = (total_cambios / total_componentes * 100) if total_componentes > 0 else 0
-            
-            col1, col2, col3 = st.columns(3)
+
+            # Sin "% Cambios": la proporción de componentes que cambian no dice
+            # cuánto trabajo implica el cambio. Eso lo responden las métricas de
+            # stands (completos / regulaciones) de la sección Resumen.
+            col1, col2 = st.columns(2)
             with col1:
                 st.metric("Total Cambios", total_cambios)
             with col2:
                 st.metric("Total Componentes", total_componentes)
-            with col3:
-                st.metric("% Cambios", f"{porcentaje:.1f}%")
     except Exception as e:
         logger.error(f"Error mostrando métricas: {str(e)}")
 
@@ -978,7 +978,11 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         st.markdown("### Análisis Técnico")
         
         columnas_ddp = [col for col in df_a.columns if col not in ["STD", "Producto", "Familia"]]
-        
+
+        # Se inicializa antes del `if`: la sección Resumen la lee más abajo y sin
+        # esto, un producto sin columnas técnicas lanzaba NameError.
+        resumen_ddp = pd.DataFrame()
+
         if columnas_ddp:
             with st.spinner("Analizando diferencias técnicas..."):
                 resumen_ddp = comparar_productos(df_a, df_b, columnas_ddp)
@@ -1040,17 +1044,36 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         # ===============================
         st.markdown("---")
         st.markdown("### Resumen")
+        st.caption(
+            "Solo el tren laminador (M1–M4, A1–A6). El desbaste no se cuenta: ni la "
+            "posición DU del diagrama de pase, ni el diagrama de desbaste, que se "
+            "compara por familia y es otra unidad de análisis."
+        )
 
-        resumen_total = pd.DataFrame()
+        # Intervención por stand. `clasificar_cambios_codigo_canal` ya restringe sus
+        # conteos a POSICIONES_LINEA (§6.10), así que DU queda fuera por construcción.
+        try:
+            cambios_completos, regulaciones, _ = clasificar_cambios_codigo_canal(df_a, df_b)
+        except Exception as e:
+            logger.error(f"Error clasificando cambios de stand: {str(e)}")
+            cambios_completos, regulaciones = 0, 0
 
-        if not resumen_ddp.empty:
-            resumen_total = pd.concat([resumen_total, resumen_ddp], ignore_index=True)
-        if not df_desbaste_cmp.empty:
-            resumen_total = pd.concat([resumen_total, df_desbaste_cmp], ignore_index=True)
+        col_r1, col_r2, col_r3 = st.columns(3)
+        with col_r1:
+            st.metric("Cambios completos de stand", cambios_completos)
+        with col_r2:
+            st.metric("Regulaciones", regulaciones)
+        with col_r3:
+            st.metric("Stands intervenidos", cambios_completos + regulaciones)
+
+        # La tabla por componente sale SOLO del diagrama de pase y SOLO de las
+        # posiciones del tren. `df_desbaste_cmp` ya no se concatena.
+        resumen_total = resumen_ddp
 
         if not resumen_total.empty and "¿Cambia?" in resumen_total.columns:
+            solo_tren = resumen_total[resumen_total["Posicion"].isin(POSICIONES_LINEA)]
             resumen_componentes = (
-                resumen_total[resumen_total["¿Cambia?"] == "Sí"]
+                solo_tren[solo_tren["¿Cambia?"] == "Sí"]
                 .groupby("Componente")
                 .size()
                 .reset_index(name="Cantidad de Cambios")
@@ -1060,7 +1083,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             if not resumen_componentes.empty:
                 st.dataframe(resumen_componentes, width="stretch", hide_index=True)
             else:
-                st.success("No se registraron cambios en ningún componente.")
+                st.success("No se registraron cambios en ningún componente del tren.")
         else:
             st.info("No se encontraron diferencias para construir el resumen de componentes.")
 
