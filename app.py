@@ -11,7 +11,8 @@ import logging
 # =====================================
 
 st.set_page_config(
-    page_title="Cambio de Producto - Laminador", 
+    page_title="Cambio de Producto - Laminador",
+    page_icon="⚙",  # solo la pestaña del navegador, no la interfaz
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -19,6 +20,20 @@ st.set_page_config(
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _muestra_color(color: str, etiqueta: str) -> str:
+    """Muestra del color EXACTO con que el Styler pinta la fila, junto a su etiqueta.
+
+    Reemplaza los circulos emoji de las leyendas: su tono saturado no coincidia con el
+    pastel real de las celdas, asi que la leyenda describia mal la tabla.
+    """
+    return (
+        '<span style="display:inline-flex;align-items:center;gap:.5rem">'
+        '<span style="width:.9rem;height:.9rem;border-radius:3px;flex:0 0 auto;'
+        f'background:{color};border:1px solid rgba(0,0,0,.28)"></span>'
+        f'<span>{etiqueta}</span></span>'
+    )
 
 # =====================================
 # CAPACIDAD DE STANDS
@@ -157,13 +172,13 @@ def cargar_datos():
         logger.error(f"Error cargando hoja de rendimientos: {str(e)}")
 
     if errores:
-        st.error("❌ Errores al cargar archivos base:\n" + "\n".join(errores))
+        st.error("Errores al cargar archivos base:\n" + "\n".join(errores))
         return None, None, None, None
 
     if df_rendimiento is None:
         detalle = f" Hojas encontradas: {', '.join(hojas_consolidado)}." if hojas_consolidado else ""
         st.warning(
-            "⚠️ No se encontró la hoja de rendimientos dentro del Consolidado: ninguna hoja tiene "
+            "No se encontró la hoja de rendimientos dentro del Consolidado: ninguna hoja tiene "
             "a la vez una columna de código de canal y una de rendimiento." + detalle +
             " Los cálculos de canales/cilindros requeridos no estarán disponibles."
         )
@@ -247,7 +262,7 @@ def cargar_programa_usuario():
     """Maneja la carga del archivo de programa del usuario."""
     if "df_prog" not in st.session_state:
         with st.container():
-            st.markdown("### 📤 Cargar Programa")
+            st.markdown("### Cargar Programa")
             archivo_programa = st.file_uploader(
                 "Sube el archivo de programa (.xlsm o .xlsx)",
                 type=None,  # Sin filtro MIME: Streamlit rechaza xlsm por su MIME type
@@ -258,7 +273,7 @@ def cargar_programa_usuario():
             if archivo_programa is not None:
                 ext = archivo_programa.name.rsplit(".", 1)[-1].lower()
                 if ext not in ("xlsx", "xlsm"):
-                    st.error(f"❌ Formato no soportado (.{ext}). Sube un archivo .xlsx o .xlsm.")
+                    st.error(f"Formato no soportado (.{ext}). Sube un archivo .xlsx o .xlsm.")
                     archivo_programa = None
 
             if archivo_programa is not None:
@@ -271,7 +286,7 @@ def cargar_programa_usuario():
 
                         if warnings:
                             sin_match = df_merged[df_merged["Nombre STD"].isna()]["DESCRIPCIÓN"].dropna().unique().tolist()
-                            with st.expander(f"⚠️ {len(sin_match)} producto(s) sin homologación en el Mapa — requieren corrección", expanded=True):
+                            with st.expander(f"{len(sin_match)} producto(s) sin homologación en el Mapa — requieren corrección", expanded=True):
                                 st.warning("Estos productos fueron cargados pero **no tienen Nombre STD**. No podrán usarse en comparaciones hasta que se agreguen al Mapa.")
                                 st.dataframe(
                                     pd.DataFrame({"DESCRIPCIÓN sin match en Mapa": sin_match}),
@@ -281,13 +296,13 @@ def cargar_programa_usuario():
 
                         total = len(df_merged)
                         con_match = df_merged["Nombre STD"].notna().sum()
-                        st.success(f"✅ Programa cargado: {total} registros ({con_match} con homologación, {total - con_match} sin match)")
+                        st.success(f"Programa cargado: {total} registros ({con_match} con homologación, {total - con_match} sin match)")
                         st.rerun()
 
                     except ValueError as e:
-                        st.error(f"❌ {e}")
+                        st.error(f"{e}")
                     except Exception as e:
-                        st.error(f"❌ Error al procesar archivo: {e}")
+                        st.error(f"Error al procesar archivo: {e}")
                         logger.error(f"Error cargando programa: {str(e)}")
 
 # =====================================
@@ -330,7 +345,7 @@ def comparar_productos(df_a, df_b, columnas):
                 "Componente": col,
                 "Valor A": str(val_a) if not pd.isna(val_a) else "-",
                 "Valor B": str(val_b) if not pd.isna(val_b) else "-",
-                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
+                "¿Cambia?": "Sí" if cambia else "No"
             })
     
     return pd.DataFrame(resumen)
@@ -412,14 +427,14 @@ def comparar_desbaste(df_desbaste, familia_a, familia_b):
                 "Componente": comp,
                 "Valor A": str(val_a_original) if val_a_original is not None else "-",
                 "Valor B": str(val_b_original) if val_b_original is not None else "-",
-                "¿Cambia?": "✅ Sí" if cambia else "❌ No"
+                "¿Cambia?": "Sí" if cambia else "No"
             })
         
         df_resultado = pd.DataFrame(resumen_desbaste)
         
         # Log para debugging
         if not df_resultado.empty:
-            cambios = len(df_resultado[df_resultado["¿Cambia?"] == "✅ Sí"])
+            cambios = len(df_resultado[df_resultado["¿Cambia?"] == "Sí"])
             logger.info(f"Comparación desbaste {familia_a} vs {familia_b}: {cambios} cambios de {len(df_resultado)} componentes")
         
         return df_resultado
@@ -720,16 +735,22 @@ def agrupar_cambios_consecutivos(df):
 # FUNCIONES DE ESTILO Y UI
 # =====================================
 
+# Color de texto para las filas que Styler pinta con un pastel claro.
+# Obligatorio: sin el, el texto hereda el color del tema y en modo oscuro queda
+# claro sobre claro, ilegible. Los 13 fondos son claros, asi que va oscuro fijo.
+TEXTO_PASTEL = "#16202B"
+
+
 def resaltar_cambios(row):
     """Aplica estilo a las filas que tienen cambios."""
     try:
         color_cambio = "#ffebee"
         color_sin_cambio = "#f1f8e9"
         
-        if "¿Cambia?" in row and row["¿Cambia?"] == "✅ Sí":
-            return [f'background-color: {color_cambio}; font-weight: bold'] * len(row)
+        if "¿Cambia?" in row and row["¿Cambia?"] == "Sí":
+            return [f'background-color: {color_cambio}; color: {TEXTO_PASTEL}; font-weight: bold'] * len(row)
         else:
-            return [f'background-color: {color_sin_cambio}'] * len(row)
+            return [f'background-color: {color_sin_cambio}; color: {TEXTO_PASTEL}'] * len(row)
     except:
         return [''] * len(row)
 
@@ -739,7 +760,7 @@ def mostrar_info_familia(producto, df_ddp, label):
         if producto and "Familia" in df_ddp.columns:
             familia = df_ddp[df_ddp["Producto"] == producto]["Familia"].dropna().unique()
             if len(familia) > 0:
-                st.info(f"ℹ️ {label} pertenece a la familia: **{familia[0]}**")
+                st.info(f"{label} pertenece a la familia: **{familia[0]}**")
     except Exception as e:
         logger.error(f"Error mostrando familia: {str(e)}")
 
@@ -747,7 +768,7 @@ def mostrar_metricas_resumen(df_cambios):
     """Muestra métricas de resumen de cambios."""
     try:
         if not df_cambios.empty and "¿Cambia?" in df_cambios.columns:
-            total_cambios = len(df_cambios[df_cambios["¿Cambia?"] == "✅ Sí"])
+            total_cambios = len(df_cambios[df_cambios["¿Cambia?"] == "Sí"])
             total_componentes = len(df_cambios)
             porcentaje = (total_cambios / total_componentes * 100) if total_componentes > 0 else 0
             
@@ -783,7 +804,7 @@ def main():
         st.stop()
     
     # Mostrar información básica
-    with st.expander("ℹ️ Información de datos cargados", expanded=False):
+    with st.expander("Información de datos cargados", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Productos DDP", len(df_ddp))
@@ -814,7 +835,7 @@ def main():
         if "df_prog" in st.session_state:
             mostrar_secuencia_programa(df_ddp, df_tiempo)
         else:
-            st.info("📤 Por favor carga primero el archivo de programa.")
+            st.info("Por favor carga primero el archivo de programa.")
     
     # PESTAÑA 3: MAESTRANZA
     with tabs[2]:
@@ -822,7 +843,7 @@ def main():
         if "df_prog" in st.session_state:
             mostrar_resumen_maestranza(df_ddp, df_rendimiento)
         else:
-            st.info("📤 Por favor carga primero el archivo de programa.")
+            st.info("Por favor carga primero el archivo de programa.")
 
     # PESTAÑA 4: UTILAJE
     with tabs[3]:
@@ -834,7 +855,7 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     
     # Verificar columnas necesarias
     if "Familia" not in df_ddp.columns or "Producto" not in df_ddp.columns:
-        st.error("❌ El archivo DDP debe contener las columnas 'Familia' y 'Producto'")
+        st.error("El archivo DDP debe contener las columnas 'Familia' y 'Producto'")
         return
     
     # Selección de familias con ancho uniforme
@@ -890,7 +911,7 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     # Mostrar comparación
     if producto_a and producto_b:
         if producto_a == producto_b:
-            st.warning("⚠️ Has seleccionado el mismo producto en ambos lados.")
+            st.warning("Has seleccionado el mismo producto en ambos lados.")
         else:
             mostrar_comparacion_productos(
                 df_ddp, df_tiempo, df_desbaste, 
@@ -903,7 +924,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         df_b = df_ddp[df_ddp["Producto"] == producto_b]
         
         if df_a.empty or df_b.empty:
-            st.warning("⚠️ No se encontraron datos para uno o ambos productos.")
+            st.warning("No se encontraron datos para uno o ambos productos.")
             return
         
         # Tiempo de cambio — respetar direccionalidad (A→B puede ≠ B→A)
@@ -911,18 +932,18 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         tiempo_ba = obtener_tiempo_cambio(df_tiempo, producto_b, producto_a)
 
         if tiempo_ab is None and tiempo_ba is None:
-            st.warning("⚠️ **Tiempo de cambio:** No registrado para estos productos")
+            st.warning("**Tiempo de cambio:** No registrado para estos productos")
         elif tiempo_ab == tiempo_ba or tiempo_ba is None:
-            st.success(f"⏱️ **Tiempo de cambio:** {tiempo_ab} min")
+            st.success(f"**Tiempo de cambio:** {tiempo_ab} min")
         elif tiempo_ab is None:
-            st.success(f"⏱️ **Tiempo de cambio:** {tiempo_ba} min (solo dirección inversa registrada)")
+            st.success(f"**Tiempo de cambio:** {tiempo_ba} min (solo dirección inversa registrada)")
         else:
             # Asimétrico: mostrar ambas direcciones
             col_t1, col_t2 = st.columns(2)
             with col_t1:
-                st.success(f"⏱️ **{producto_a} → {producto_b}:** {tiempo_ab} min")
+                st.success(f"**{producto_a} → {producto_b}:** {tiempo_ab} min")
             with col_t2:
-                st.info(f"⏱️ **{producto_b} → {producto_a}:** {tiempo_ba} min")
+                st.info(f"**{producto_b} → {producto_a}:** {tiempo_ba} min")
         
         # Opción de filtro encima de las tablas
         st.markdown("---")
@@ -943,9 +964,9 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                 mostrar_metricas_resumen(resumen_ddp)
                 
                 if mostrar_solo_cambios:
-                    resumen_filtrado = resumen_ddp[resumen_ddp["¿Cambia?"] == "✅ Sí"]
+                    resumen_filtrado = resumen_ddp[resumen_ddp["¿Cambia?"] == "Sí"]
                     if resumen_filtrado.empty:
-                        st.success("✅ **¡No hay cambios técnicos entre estos productos!**")
+                        st.success("**¡No hay cambios técnicos entre estos productos!**")
                     else:
                         st.dataframe(
                             resumen_filtrado.style.apply(resaltar_cambios, axis=1),
@@ -975,9 +996,9 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             mostrar_metricas_resumen(df_desbaste_cmp)
             
             if mostrar_solo_cambios:
-                desbaste_filtrado = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "✅ Sí"]
+                desbaste_filtrado = df_desbaste_cmp[df_desbaste_cmp["¿Cambia?"] == "Sí"]
                 if desbaste_filtrado.empty:
-                    st.success("✅ **¡No hay cambios en el diagrama de desbaste!**")
+                    st.success("**¡No hay cambios en el diagrama de desbaste!**")
                 else:
                     st.dataframe(
                         desbaste_filtrado.style.apply(resaltar_cambios, axis=1),
@@ -989,7 +1010,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                     width="stretch"
                 )
         else:
-            st.info("ℹ️ No se encontraron datos de desbaste para comparar.")
+            st.info("No se encontraron datos de desbaste para comparar.")
         
         # ===============================
         # NUEVO RESUMEN: Cambios por Componente
@@ -1006,7 +1027,7 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
 
         if not resumen_total.empty and "¿Cambia?" in resumen_total.columns:
             resumen_componentes = (
-                resumen_total[resumen_total["¿Cambia?"] == "✅ Sí"]
+                resumen_total[resumen_total["¿Cambia?"] == "Sí"]
                 .groupby("Componente")
                 .size()
                 .reset_index(name="Cantidad de Cambios")
@@ -1016,9 +1037,9 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             if not resumen_componentes.empty:
                 st.dataframe(resumen_componentes, width="stretch", hide_index=True)
             else:
-                st.success("✅ No se registraron cambios en ningún componente.")
+                st.success("No se registraron cambios en ningún componente.")
         else:
-            st.info("ℹ️ No se encontraron diferencias para construir el resumen de componentes.")
+            st.info("No se encontraron diferencias para construir el resumen de componentes.")
 
             
     except Exception as e:
@@ -1033,7 +1054,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
         st.markdown(f"**Programa cargado:** {len(df_prog)} registros")
 
         # --- Capacidad de taller (editable) ---
-        with st.expander("⚙️ Capacidad de stands", expanded=False):
+        with st.expander("Capacidad de stands", expanded=False):
             st.markdown(
                 "El análisis cruza **dos restricciones distintas**:\n\n"
                 "- **¿Tengo los stands?** Los disponibles no son un número fijo: se calculan como "
@@ -1076,7 +1097,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
         horas_bloques = horas_por_bloque(df_prog)
         if horas_bloques is None:
             st.info(
-                "ℹ️ El programa no trae columnas `INICIO`/`FIN`, así que no se puede evaluar "
+                "El programa no trae columnas `INICIO`/`FIN`, así que no se puede evaluar "
                 "si alcanza el **tiempo** para preparar. Se evalúa solo la disponibilidad de stands."
             )
         grupos_prog = (df_prog["Nombre STD"] != df_prog["Nombre STD"].shift()).cumsum()
@@ -1150,7 +1171,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 })
         
         if not resumen:
-            st.info("ℹ️ No se encontraron cambios de producto en la secuencia.")
+            st.info("No se encontraron cambios de producto en la secuencia.")
             return
         
         # Agrupar cambios consecutivos
@@ -1218,7 +1239,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                         f"{f['Producto Destino']} — {f['Estado']}: {f['Motivo']}"
                         for _, f in criticos.iterrows()
                     ]
-                    st.error("🔴 **Cambios que no se pueden dejar preparados:**\n" + "\n".join(lineas))
+                    st.error("**Cambios que no se pueden dejar preparados:**\n" + "\n".join(lineas))
 
                 if not ajustados.empty:
                     lineas = [
@@ -1226,11 +1247,11 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                         f"{f['Producto Destino']} — {f['Motivo']}"
                         for _, f in ajustados.iterrows()
                     ]
-                    st.warning("🟡 **Margen ajustado (alcanza, pero sin holgura):**\n" + "\n".join(lineas))
+                    st.warning("**Margen ajustado (alcanza, pero sin holgura):**\n" + "\n".join(lineas))
 
                 if not no_eval.empty:
                     st.info(
-                        f"ℹ️ {len(no_eval)} cambio(s) no evaluable(s) por falta de homologación en el "
+                        f"{len(no_eval)} cambio(s) no evaluable(s) por falta de homologación en el "
                         "Mapa o de diagrama de pase. Un producto sin homologar ciega también los "
                         "cambios vecinos: corregirlo en el Mapa maestro recupera esa visibilidad."
                     )
@@ -1246,7 +1267,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 st.dataframe(tabla_cap, width="stretch", hide_index=True)
         except Exception as e:
             logger.error(f"Error mostrando capacidad de stands: {str(e)}")
-            st.warning("⚠️ No se pudo calcular la capacidad de stands.")
+            st.warning("No se pudo calcular la capacidad de stands.")
 
         # Mostrar cambios detallados
         st.markdown("---")
@@ -1254,7 +1275,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
         
         for idx, fila in df_resumen.iterrows():
             try:
-                tiempo_mostrar = f"{int(fila['Tiempo estimado'])} min" if pd.notna(fila.get('Tiempo estimado')) else "⚠️ No registrado"
+                tiempo_mostrar = f"{int(fila['Tiempo estimado'])} min" if pd.notna(fila.get('Tiempo estimado')) else "No registrado"
                 
                 # Color coding para el tiempo
                 if pd.notna(fila.get('Tiempo estimado')):
@@ -1280,7 +1301,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 }.get(estado_fila, "")
                 sufijo_estado = f" | {icono_estado} {estado_fila}" if estado_fila else ""
 
-                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | ⏱️ {tiempo_mostrar} | {cambios_completos_fila} cambio(s) completo(s) | {regulaciones_fila} regulación(es){sufijo_estado}"
+                titulo = f"{tiempo_color} **Cambio #{secuencia}** | {origen} → {destino} | {tiempo_mostrar} | {cambios_completos_fila} cambio(s) completo(s) | {regulaciones_fila} regulación(es){sufijo_estado}"
 
                 with st.expander(titulo):
                     if estado_fila:
@@ -1328,12 +1349,12 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                         resumen_cmp = comparar_productos(df_a_cmp, df_b_cmp, columnas_cmp)
                         
                         if not resumen_cmp.empty:
-                            resumen_cmp_cambios = resumen_cmp[resumen_cmp["¿Cambia?"] == "✅ Sí"]
+                            resumen_cmp_cambios = resumen_cmp[resumen_cmp["¿Cambia?"] == "Sí"]
                             
                             if not resumen_cmp_cambios.empty:
                                 st.dataframe(resumen_cmp_cambios, width="stretch")
                             else:
-                                st.success("✅ No hay cambios técnicos para este cambio de producto")
+                                st.success("No hay cambios técnicos para este cambio de producto")
                         else:
                             st.info("No se pudieron analizar las diferencias técnicas")
                     else:
@@ -1587,7 +1608,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
 
             # Verificar que existe la columna PROGR
             if "PROGR" not in df_prog.columns:
-                st.error("❌ El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
+                st.error("El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
                 return
 
             # --- AUDITORÍA 1: filas con PROGR nulo ---
@@ -1666,7 +1687,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                 df_resumen = df_programa[["Nombre STD", "Toneladas"]]
                 productos_sin_ddp = list(df_programa["Nombre STD"].unique())
                 audit_posiciones = []
-                st.warning("⚠️ No se encontraron columnas 'STD' o 'Código Canal' para análisis detallado")
+                st.warning("No se encontraron columnas 'STD' o 'Código Canal' para análisis detallado")
         
         # Mostrar métricas generales
         try:
@@ -1692,7 +1713,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
         if hay_alertas:
             n_criticos = len(productos_sin_ddp)
             n_advertencias = len(productos_solo_nulos) + len(audit_posiciones)
-            titulo = f"{'🔴' if n_criticos else '⚠️'} Inconsistencias detectadas — {n_criticos} crítica(s), {n_advertencias} advertencia(s)"
+            titulo = f"Inconsistencias detectadas — {n_criticos} crítica(s), {n_advertencias} advertencia(s)"
 
             with st.expander(titulo, expanded=True):
 
@@ -1721,7 +1742,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                         width="stretch", hide_index=True
                     )
         else:
-            st.success("✅ Sin inconsistencias — todos los productos tienen datos completos.")
+            st.success("Sin inconsistencias — todos los productos tienen datos completos.")
 
         # Tabla principal
         st.markdown("### Resumen Detallado por Producto")
@@ -1779,13 +1800,13 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                     ].tolist()
                     if sin_rendimiento:
                         st.warning(
-                            f"⚠️ {len(sin_rendimiento)} código(s) de canal sin rendimiento registrado en el "
+                            f"{len(sin_rendimiento)} código(s) de canal sin rendimiento registrado en el "
                             f"Consolidado — no fue posible estimar canales/cilindros requeridos: "
                             + ", ".join(sin_rendimiento)
                         )
                 except Exception as e:
                     logger.error(f"Error calculando canales/cilindros requeridos: {str(e)}")
-                    st.warning("⚠️ No se pudieron calcular los canales/cilindros requeridos (rendimiento).")
+                    st.warning("No se pudieron calcular los canales/cilindros requeridos (rendimiento).")
 
                 # Mostrar tabla de frecuencias
                 st.dataframe(frecuencia_en_programa.set_index("Código Canal"), width="stretch")
@@ -1815,7 +1836,7 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
         # ===============================================
 
         st.markdown("---")
-        st.markdown("### 📥 Exportar Datos")
+        st.markdown("### Exportar Datos")
 
         col1, col2 = st.columns(2)
 
@@ -1846,7 +1867,7 @@ def mostrar_analisis_utilaje(df_ddp):
     try:
         # Verificar que tenemos los datos necesarios
         if df_ddp.empty:
-            st.warning("⚠️ No hay datos de productos disponibles para análisis de utilaje.")
+            st.warning("No hay datos de productos disponibles para análisis de utilaje.")
             return
         
         # Definir componentes de utilaje
@@ -1881,12 +1902,12 @@ def mostrar_analisis_utilaje(df_ddp):
             st.metric("Componentes Faltantes", len(componentes_faltantes))
         
         if componentes_faltantes:
-            with st.expander("⚠️ Componentes no encontrados en los datos"):
+            with st.expander("Componentes no encontrados en los datos"):
                 for comp in componentes_faltantes:
                     st.write(f"• {comp}")
         
         if not componentes_disponibles:
-            st.error("❌ No se encontraron componentes de utilaje en los datos.")
+            st.error("No se encontraron componentes de utilaje en los datos.")
             return
         
         # Crear pestañas para diferentes análisis
@@ -1902,11 +1923,11 @@ def mostrar_analisis_utilaje(df_ddp):
             if "df_prog" in st.session_state:
                 mostrar_utilaje_programa(df_ddp, componentes_disponibles)
             else:
-                st.info("📤 Por favor carga primero el archivo de programa para ver el análisis de utilaje según la secuencia de producción.")
+                st.info("Por favor carga primero el archivo de programa para ver el análisis de utilaje según la secuencia de producción.")
         
         # PESTAÑA 2: ANÁLISIS INDIVIDUAL
         with sub_tabs[1]:
-            st.markdown("### 🔍 Análisis Individual de Producto")
+            st.markdown("### Análisis Individual de Producto")
             
             productos_disponibles = sorted(df_ddp["Producto"].dropna().unique()) if "Producto" in df_ddp.columns else []
             
@@ -1958,9 +1979,9 @@ def mostrar_analisis_utilaje(df_ddp):
                 if producto_a_util != producto_b_util:
                     comparar_utilaje_productos(df_ddp, producto_a_util, producto_b_util, componentes_disponibles, solo_diferencias)
                 else:
-                    st.warning("⚠️ Selecciona productos diferentes para compararlos.")
+                    st.warning("Selecciona productos diferentes para compararlos.")
             else:
-                st.warning("⚠️ Se necesitan al menos 2 productos para comparar.")
+                st.warning("Se necesitan al menos 2 productos para comparar.")
         
         # PESTAÑA 4: ESTADÍSTICAS GENERALES
         with sub_tabs[3]:
@@ -1985,7 +2006,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
             
             # Verificar que existe la columna PROGR para toneladas
             if "PROGR" not in df_prog.columns:
-                st.error("❌ El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
+                st.error("El archivo de programa debe contener la columna 'PROGR' para calcular toneladas")
                 return
             
             # Agrupar y sumar toneladas
@@ -2060,11 +2081,11 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
             def colorear_cambios(row):
                 cambios = row["Componentes que Cambian"]
                 if cambios >= 10:
-                    return ['background-color: #ffcdd2'] * len(row)  # Rojo claro
+                    return [f'background-color: #ffcdd2; color: {TEXTO_PASTEL}'] * len(row)  # Rojo claro
                 elif cambios >= 5:
-                    return ['background-color: #fff9c4'] * len(row)  # Amarillo claro
+                    return [f'background-color: #fff9c4; color: {TEXTO_PASTEL}'] * len(row)  # Amarillo claro
                 else:
-                    return ['background-color: #c8e6c9'] * len(row)  # Verde claro
+                    return [f'background-color: #c8e6c9; color: {TEXTO_PASTEL}'] * len(row)  # Verde claro
             
             st.dataframe(
                 df_cambios.style.apply(colorear_cambios, axis=1),
@@ -2073,14 +2094,17 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
             )
             
             # Leyenda de colores
-            with st.expander("📋 Leyenda de colores"):
+            with st.expander("Leyenda de colores"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown("🟢 **Verde:** 1-4 componentes cambian")
+                    st.markdown(_muestra_color("#c8e6c9", "<b>1-4</b> componentes cambian"),
+                                unsafe_allow_html=True)
                 with col2:
-                    st.markdown("🟡 **Amarillo:** 5-9 componentes cambian")
+                    st.markdown(_muestra_color("#fff9c4", "<b>5-9</b> componentes cambian"),
+                                unsafe_allow_html=True)
                 with col3:
-                    st.markdown("🔴 **Rojo:** 10+ componentes cambian")
+                    st.markdown(_muestra_color("#ffcdd2", "<b>10+</b> componentes cambian"),
+                                unsafe_allow_html=True)
         
         # Análisis de frecuencia de utilajes en el programa
         st.markdown("---")
@@ -2176,7 +2200,7 @@ def mostrar_utilaje_programa(df_ddp, componentes_disponibles):
         col1, col2, col3 = st.columns([1, 1, 2])
         
         with col1:
-            if st.button("📥 Exportar Análisis de Utilaje", key="export_utilaje_programa"):
+            if st.button("Exportar Análisis de Utilaje", key="export_utilaje_programa"):
                 exportar_utilaje_programa(df_programa, df_ddp, componentes_disponibles, cambios_utilaje)
         
     except Exception as e:
@@ -2273,7 +2297,7 @@ def exportar_utilaje_programa(df_programa, df_ddp, componentes_disponibles, camb
             help="Incluye resumen de utilaje por programa, cambios y frecuencias"
         )
         
-        st.success("✅ Análisis exportado exitosamente")
+        st.success("Análisis exportado exitosamente")
         
     except Exception as e:
         st.error(f"Error exportando análisis: {str(e)}")
@@ -2287,7 +2311,7 @@ def mostrar_utilaje_producto(df_ddp, producto, componentes_disponibles, mostrar_
         datos_producto = df_ddp[df_ddp["Producto"] == producto]
         
         if datos_producto.empty:
-            st.warning(f"⚠️ No se encontraron datos para el producto {producto}")
+            st.warning(f"No se encontraron datos para el producto {producto}")
             return
         
         # Crear tabla de utilaje
@@ -2320,11 +2344,11 @@ def mostrar_utilaje_producto(df_ddp, producto, componentes_disponibles, mostrar_
             # Aplicar estilo condicional
             def resaltar_multiples(row):
                 if row["Múltiples Valores"] == "Sí":
-                    return ['background-color: #fff3cd'] * len(row)
+                    return [f'background-color: #fff3cd; color: {TEXTO_PASTEL}'] * len(row)
                 elif row["Valor"] == "No definido":
-                    return ['background-color: #f8d7da'] * len(row)
+                    return [f'background-color: #f8d7da; color: {TEXTO_PASTEL}'] * len(row)
                 else:
-                    return ['background-color: #d1edff'] * len(row)
+                    return [f'background-color: #d1edff; color: {TEXTO_PASTEL}'] * len(row)
             
             st.dataframe(
                 df_utilaje.style.apply(resaltar_multiples, axis=1),
@@ -2333,16 +2357,19 @@ def mostrar_utilaje_producto(df_ddp, producto, componentes_disponibles, mostrar_
             )
             
             # Mostrar leyenda de colores
-            with st.expander("📋 Leyenda de colores"):
+            with st.expander("Leyenda de colores"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown("🔵 **Azul:** Valor único definido")
+                    st.markdown(_muestra_color("#d1edff", "Valor único definido"),
+                                unsafe_allow_html=True)
                 with col2:
-                    st.markdown("🟡 **Amarillo:** Múltiples valores")
+                    st.markdown(_muestra_color("#fff3cd", "Múltiples valores"),
+                                unsafe_allow_html=True)
                 with col3:
-                    st.markdown("🔴 **Rojo:** No definido")
+                    st.markdown(_muestra_color("#f8d7da", "No definido"),
+                                unsafe_allow_html=True)
         else:
-            st.info("ℹ️ No hay componentes de utilaje definidos para este producto (o todos están ocultos por el filtro).")
+            st.info("No hay componentes de utilaje definidos para este producto (o todos están ocultos por el filtro).")
             
     except Exception as e:
         st.error(f"Error mostrando utilaje del producto: {str(e)}")
@@ -2357,7 +2384,7 @@ def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_dispo
         datos_b = df_ddp[df_ddp["Producto"] == producto_b]
         
         if datos_a.empty or datos_b.empty:
-            st.warning("⚠️ No se encontraron datos para uno o ambos productos.")
+            st.warning("No se encontraron datos para uno o ambos productos.")
             return
         
         # Crear comparación
@@ -2383,7 +2410,7 @@ def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_dispo
                 "Componente": componente,
                 f"Producto A ({producto_a})": valor_a,
                 f"Producto B ({producto_b})": valor_b,
-                "¿Diferente?": "✅ Sí" if diferentes else "❌ No"
+                "¿Diferente?": "Sí" if diferentes else "No"
             })
         
         if comparacion_data:
@@ -2391,7 +2418,7 @@ def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_dispo
             
             # Mostrar métricas de comparación
             total_componentes = len(df_comparacion)
-            componentes_diferentes = len(df_comparacion[df_comparacion["¿Diferente?"] == "✅ Sí"])
+            componentes_diferentes = len(df_comparacion[df_comparacion["¿Diferente?"] == "Sí"])
             porcentaje_diferencias = (componentes_diferentes / total_componentes * 100) if total_componentes > 0 else 0
             
             col1, col2, col3 = st.columns(3)
@@ -2404,10 +2431,10 @@ def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_dispo
             
             # Aplicar estilo a la tabla
             def resaltar_diferencias(row):
-                if row["¿Diferente?"] == "✅ Sí":
-                    return ['background-color: #ffebee'] * len(row)
+                if row["¿Diferente?"] == "Sí":
+                    return [f'background-color: #ffebee; color: {TEXTO_PASTEL}'] * len(row)
                 else:
-                    return ['background-color: #f1f8e9'] * len(row)
+                    return [f'background-color: #f1f8e9; color: {TEXTO_PASTEL}'] * len(row)
             
             st.dataframe(
                 df_comparacion.style.apply(resaltar_diferencias, axis=1),
@@ -2417,9 +2444,9 @@ def comparar_utilaje_productos(df_ddp, producto_a, producto_b, componentes_dispo
             
         else:
             if solo_diferencias:
-                st.success("✅ **¡No hay diferencias en el utilaje entre estos productos!**")
+                st.success("**¡No hay diferencias en el utilaje entre estos productos!**")
             else:
-                st.info("ℹ️ No se encontraron componentes de utilaje para comparar.")
+                st.info("No se encontraron componentes de utilaje para comparar.")
                 
     except Exception as e:
         st.error(f"Error comparando utilaje: {str(e)}")
@@ -2463,16 +2490,16 @@ def mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles):
                         valor_mas_comun = frecuencias.iloc[0]["Valor"] if not frecuencias.empty else "N/A"
                         st.metric("Valor Más Común", valor_mas_comun)
                 else:
-                    st.info(f"ℹ️ No hay valores definidos para {componente_analisis}")
+                    st.info(f"No hay valores definidos para {componente_analisis}")
             
             with col_exportar:
                 # Botón para exportar análisis completo
-                if st.button("📥 Exportar Análisis"):
+                if st.button("Exportar Análisis"):
                     exportar_analisis_utilaje(df_ddp, componentes_disponibles)
         
         # Resumen general de todos los componentes
         st.markdown("---")
-        st.markdown("#### 📋 Resumen General de Componentes")
+        st.markdown("#### Resumen General de Componentes")
         
         resumen_general = []
         for componente in componentes_disponibles:
@@ -2495,11 +2522,11 @@ def mostrar_estadisticas_utilaje(df_ddp, componentes_disponibles):
         def colorear_cobertura(row):
             cobertura = float(row["Cobertura (%)"].replace("%", ""))
             if cobertura >= 80:
-                return ['background-color: #d1edff'] * len(row)
+                return [f'background-color: #d1edff; color: {TEXTO_PASTEL}'] * len(row)
             elif cobertura >= 50:
-                return ['background-color: #fff3cd'] * len(row)
+                return [f'background-color: #fff3cd; color: {TEXTO_PASTEL}'] * len(row)
             else:
-                return ['background-color: #f8d7da'] * len(row)
+                return [f'background-color: #f8d7da; color: {TEXTO_PASTEL}'] * len(row)
         
         st.dataframe(
             df_resumen.style.apply(colorear_cobertura, axis=1),
@@ -2566,7 +2593,7 @@ def exportar_analisis_utilaje(df_ddp, componentes_disponibles):
             help="Incluye resumen por componentes, matriz completa y estadísticas"
         )
         
-        st.success("✅ Análisis exportado exitosamente")
+        st.success("Análisis exportado exitosamente")
         
     except Exception as e:
         st.error(f"Error exportando análisis: {str(e)}")

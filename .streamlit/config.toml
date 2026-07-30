@@ -1,0 +1,56 @@
+# Tema de la app - Cambio de Producto, Laminador Renca
+#
+# Costo de carga: CERO. El tema se resuelve al servir la app; no entra en el ciclo de
+# datos ni agrega peticiones de red. Se usan SOLO fuentes del sistema a proposito:
+# una fuente web anadiria una descarga por visita para no aportar nada operativo.
+#
+# Criterio de color: verde / amarillo / rojo estan RESERVADOS para la severidad del
+# cambio (ver las leyendas de "componentes que cambian" y la cobertura de utilaje).
+# Por eso el acento de marca es azul: si fuera rojo o ambar competiria con el
+# significado que ya tienen esos colores en las tablas.
+
+[theme]
+base = "light"
+
+primaryColor = "#1B5E9E"              # azul acero: botones, foco, seleccion
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F4F8"  # tarjetas, barra lateral, celdas alternas
+textColor = "#16202B"
+linkColor = "#1B5E9E"
+
+borderColor = "#D8DEE6"
+showWidgetBorder = true               # da contorno a selectores y campos
+showSidebarBorder = true
+
+# Tablas: el header deja de fundirse con los datos. Son 21 dataframes en la app,
+# asi que distinguir header de contenido es lo que mas se nota.
+dataframeHeaderBackgroundColor = "#E8EDF3"
+dataframeBorderColor = "#D8DEE6"
+
+# Tipografia del sistema, sin descargas
+font = "sans-serif"
+headingFont = "sans-serif"
+baseFontSize = 15
+
+# Los 37 st.metric son el primer dato que se lee en cada pestana
+metricValueFontSize = "1.75rem"
+
+baseRadius = "medium"
+buttonRadius = "medium"
+
+[theme.dark]
+primaryColor = "#5FA8E8"
+backgroundColor = "#111820"
+secondaryBackgroundColor = "#1A2430"
+textColor = "#E6EDF5"
+linkColor = "#5FA8E8"
+borderColor = "#2C3948"
+dataframeHeaderBackgroundColor = "#1F2B38"
+dataframeBorderColor = "#2C3948"
+
+[server]
+# El Consolidado y la BBDD de tiempo se suben como programa; 25 MB da margen
+maxUploadSize = 25
+
+[browser]
+gatherUsageStats = false

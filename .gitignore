@@ -1,0 +1,18 @@
+# Bytecode: se regenera al correr la app en local y no debe viajar al repo.
+__pycache__/
+*.py[cod]
+
+# Entornos virtuales: el de este proyecto vive FUERA de OneDrive por MAX_PATH
+# (ver CLAUDE.md 9). Si alguien crea uno aca por error, que no se commitee.
+.venv/
+venv/
+env/
+
+# Temporales de Excel. La carpeta data/ esta versionada a proposito, pero los
+# archivos de bloqueo que abre Excel (~$Consolidado_Laminador.xlsx) no.
+~$*
+*.tmp
+
+# Secretos de Streamlit. La app no usa ninguno hoy; esto evita que un
+# secrets.toml futuro entre al repo por descuido.
+.streamlit/secrets.toml
