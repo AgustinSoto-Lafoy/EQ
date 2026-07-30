@@ -205,12 +205,35 @@ def _cruzar_programa_con_mapa(archivo_bytes):
                 f"Hojas disponibles: {wb.sheetnames}"
             )
 
+    warnings = []
+
     # --- Leer Mapa ---
+    # Contrato POSICIONAL: se leen las 4 primeras columnas y se les asignan estos
+    # nombres, ignorando el encabezado real de la hoja.
+    # `max_col=4` es obligatorio: el Mapa maestro trae 6 columnas (agrega "Recetas"
+    # y "RM_LR"), y sin acotar, pd.DataFrame aborta la carga entera con
+    # "4 columns passed, passed data had 6 columns".
+    COLS_MAPA = ["Producto Limpio", "Nombre STD", "Producto STD", "Es Prueba"]
     ws_mapa = wb["Mapa"]
-    mapa_rows = list(ws_mapa.iter_rows(min_row=2, values_only=True))
+
+    # El contrato posicional falla en silencio si alguien reordena el Mapa: se leería
+    # la columna equivocada sin error. Se valida el encabezado para que avise.
+    encabezado = next(
+        ws_mapa.iter_rows(min_row=1, max_row=1, max_col=4, values_only=True),
+        (),
+    )
+    encabezado = [str(h).strip() if h is not None else "" for h in encabezado]
+    if encabezado != COLS_MAPA:
+        warnings.append(
+            "Los encabezados A:D de la hoja 'Mapa' no son los esperados. "
+            f"Se encontró {encabezado} y se esperaba {COLS_MAPA}. "
+            "Se leyó igual por posición; verifica el orden de las columnas."
+        )
+
+    mapa_rows = list(ws_mapa.iter_rows(min_row=2, max_col=4, values_only=True))
     df_mapa = pd.DataFrame(
         mapa_rows,
-        columns=["Producto Limpio", "Nombre STD", "Producto STD", "Es Prueba"]
+        columns=COLS_MAPA
     ).dropna(subset=["Producto Limpio"])
     df_mapa["_key"] = df_mapa["Producto Limpio"].astype(str).str.strip()
 
@@ -248,7 +271,7 @@ def _cruzar_programa_con_mapa(archivo_bytes):
 
     # Calcular filas sin match para advertencia
     sin_match = df_merged[df_merged["Nombre STD"].isna()]["DESCRIPCIÓN"].dropna().unique().tolist()
-    warnings = []
+    # `warnings` ya viene inicializada arriba: puede traer el aviso de encabezados.
     if sin_match:
         warnings.append(
             f"{len(sin_match)} producto(s) sin homologación en el Mapa: {', '.join(str(x) for x in sin_match[:5])}"
