@@ -1491,7 +1491,20 @@ _SUFIJOS_MOLETEADO = ("MOLETEADO", "MOLET", "MLTDO", "MOL")
 # no consume canales ni cilindros — por lo que queda fuera del cálculo de
 # canales/cilindros requeridos. Sí se muestra en el diagrama de pases, donde
 # significa justamente que esa posición no se usa.
-_CODIGOS_PASE_FALSO = {"F"}
+#
+# Los Diagramas de Pase vigentes lo anotan CON la posición (`F A5`, `F M3`, `FA 6`),
+# que tras normalizar queda `FA5`/`FM3`/`FA6`. Se aceptan todas: la posición ya la da
+# la fila del diagrama, así que dentro del código es redundante (criterio de
+# operaciones, 2026-08-03). Reconocerlas no es cosmético — un pase falso tomado por
+# canal real vuelve a contarse como cilindro (§6.8) y como stand a montar (§6.10).
+#
+# El patrón queda ACOTADO a las posiciones del tren en vez de aceptar cualquier
+# código que empiece con F: si algún día aparece un canal real tipo `FR 12`, debe
+# seguir contándose como canal. Hoy no existe ninguno — medido sobre el DDP y sobre
+# la hoja de rendimientos, lo único que empieza con F es el pase falso.
+_CODIGOS_PASE_FALSO = frozenset(
+    {"F"} | {f"F{posicion}" for posicion in ("DU",) + POSICIONES_LINEA}
+)
 
 
 def _normalizar_codigo_canal(valor):
