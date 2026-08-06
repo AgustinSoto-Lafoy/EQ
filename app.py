@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import math
+import re
 import numpy as np
 from datetime import datetime
 import logging
@@ -891,6 +892,29 @@ def resaltar_cambios(row):
     except:
         return [''] * len(row)
 
+def etiqueta_producto(nombre):
+    """Cómo se MUESTRA y se BUSCA un producto en los selectores.
+
+    9 de los 146 productos del DDP traen espacios internos dobles
+    (`PLANA  50 x 6`, `CUADRADO  10`, `REDONDO 1 3/4"  (44.5) mm`), y la grafía
+    es inconsistente dentro de una misma familia: `PLANA  50 x 6` lleva dos y
+    `PLANA 50 x 4` uno. El filtro del `selectbox` compara subcadenas literales,
+    así que escribir `PLANA 50 x 6` con un espacio no encuentra nada.
+
+    Es un fallo especialmente malo de diagnosticar porque **un espacio de más es
+    invisible en pantalla**: el producto no parece mal escrito, parece no existir.
+
+    Se colapsa SOLO para mostrar; el selector sigue devolviendo el nombre
+    original. Colapsarlo en el dato NO es opción: el cruce con el `Nombre STD`
+    del Mapa es byte a byte y dejaría 26 filas sin diagrama de pase (§6.11).
+
+    Seguro porque los 146 productos siguen siendo únicos al colapsar. Si alguna
+    vez dos colapsaran al mismo texto, el selector mostraría dos opciones
+    idénticas e indistinguibles; lo vigila `verificar_busqueda_productos.py`.
+    """
+    return re.sub(r"\s+", " ", str(nombre)).strip()
+
+
 def mostrar_info_familia(producto, df_ddp, label):
     """Muestra información de la familia del producto."""
     try:
@@ -1029,7 +1053,8 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     
     with col_a:
         if productos_a:
-            producto_a = st.selectbox("Producto A", productos_a, key="A")
+            producto_a = st.selectbox("Producto A", productos_a, key="A",
+                                      format_func=etiqueta_producto)
             if familia_a == "(Todos)":
                 mostrar_info_familia(producto_a, df_ddp, "Producto A")
         else:
@@ -1038,7 +1063,8 @@ def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     
     with col_b:
         if productos_b:
-            producto_b = st.selectbox("Producto B", productos_b, key="B")
+            producto_b = st.selectbox("Producto B", productos_b, key="B",
+                                      format_func=etiqueta_producto)
             if familia_b == "(Todos)":
                 mostrar_info_familia(producto_b, df_ddp, "Producto B")
         else:
@@ -2140,7 +2166,8 @@ def mostrar_analisis_utilaje(df_ddp):
                     producto_seleccionado = st.selectbox(
                         "Selecciona un producto para ver su utilaje:",
                         productos_disponibles,
-                        key="producto_utilaje_individual"
+                        key="producto_utilaje_individual",
+                        format_func=etiqueta_producto
                     )
                 
                 with col_filtro:
@@ -2163,7 +2190,8 @@ def mostrar_analisis_utilaje(df_ddp):
                     producto_a_util = st.selectbox(
                         "Producto A:",
                         productos_disponibles,
-                        key="producto_a_utilaje_comp"
+                        key="producto_a_utilaje_comp",
+                        format_func=etiqueta_producto
                     )
                 
                 with col_b:
@@ -2171,7 +2199,8 @@ def mostrar_analisis_utilaje(df_ddp):
                         "Producto B:",
                         productos_disponibles,
                         index=1 if len(productos_disponibles) > 1 else 0,
-                        key="producto_b_utilaje_comp"
+                        key="producto_b_utilaje_comp",
+                        format_func=etiqueta_producto
                     )
                 
                 with col_opciones:
