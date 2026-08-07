@@ -94,6 +94,22 @@ NIVEL_LEVE = "Leve"
 NIVEL_NO_APLICA = "—"
 
 # =====================================
+# MODOS DE LECTURA DEL COMPARADOR
+# =====================================
+# La misma comparación la leen dos públicos con preguntas distintas:
+#   - Taller  : qué componente cambia, para preparar el stand fuera de línea.
+#               Es la vista histórica y el default; quien ya la usa no ve nada
+#               distinto hasta que cambia el modo a propósito.
+#   - Laminación: qué pasa en CADA STAND, para operar el cambio en línea.
+#
+# Son dos presentaciones de la MISMA clasificación, no dos cálculos. Ambas leen
+# el detalle de `clasificar_cambios_codigo_canal`; si cada modo contara por su
+# cuenta, el mismo cambio mostraría dos cifras según dónde se mire, que es
+# exactamente la lección de `cb41c68`.
+MODO_TALLER = "Taller"
+MODO_LAMINACION = "Laminación"
+
+# =====================================
 # FUNCIONES DE CARGA DE DATOS
 # =====================================
 
@@ -526,11 +542,19 @@ def _parametros_cambiados(row_a, row_b, columnas):
 
 
 def _nivel_regulacion(parametros_cambiados):
-    """Gradúa una regulación en Leve o Fuerte. Devuelve (nivel, motivo).
+    """Gradúa una regulación en Leve o Fuerte. Devuelve (nivel, motivo, piezas).
 
     Fuerte = hay que cambiar una PIEZA de guía, o sea buscarla, desarmar y
     montar. Leve = el stand se ajusta donde está. El motivo nombra las piezas
     primero porque son la razón del nivel; lo demás va detrás como contexto.
+
+    `piezas` y `otros` se devuelven además del motivo para que el modo
+    Laminación pueda listarlos sin parsear el texto. Es el mismo cálculo, no
+    uno nuevo: un parser del motivo se desincronizaría en silencio en cuanto
+    alguien cambiara la redacción.
+
+    La tupla creció de 2 a 3 elementos y eso es compatible: los consumidores
+    —incluida `verificar_nivel_regulacion.py`— indexan `[0]` y `[1]`.
     """
     piezas = [c for c in parametros_cambiados if c in PIEZAS_GUIA]
     otros = [c for c in parametros_cambiados if c not in PIEZAS_GUIA]
@@ -539,11 +563,11 @@ def _nivel_regulacion(parametros_cambiados):
         motivo = "cambia guía: " + ", ".join(piezas)
         if otros:
             motivo += " · además " + ", ".join(otros)
-        return NIVEL_FUERTE, motivo
+        return NIVEL_FUERTE, motivo, piezas
 
     if otros:
-        return NIVEL_LEVE, "cambia: " + ", ".join(otros)
-    return NIVEL_LEVE, "sin cambios de parámetros"
+        return NIVEL_LEVE, "cambia: " + ", ".join(otros), []
+    return NIVEL_LEVE, "sin cambios de parámetros", []
 
 
 def contar_regulaciones(detalle):
@@ -646,14 +670,16 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             if not parametros_cambiados:
                 continue
 
-            nivel, motivo = _nivel_regulacion(parametros_cambiados)
+            nivel, motivo, piezas = _nivel_regulacion(parametros_cambiados)
             detalle.append({
                 "Posición": pos,
                 "Código Origen": codigo_a if pd.notna(codigo_a) else "-",
                 "Código Destino": codigo_b if pd.notna(codigo_b) else "-",
                 "Categoría": "Regulación",
                 "Nivel": nivel,
-                "Motivo": "Mismo código; " + motivo
+                "Motivo": "Mismo código; " + motivo,
+                "Piezas": piezas,
+                "Parámetros": parametros_cambiados,
             })
             continue
 
@@ -661,7 +687,7 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
         # existiendo en algún lugar del producto destino?
         if pd.notna(codigo_a) and codigo_a in codigos_destino_existentes:
             categoria = "Regulación"
-            nivel, motivo_nivel = _nivel_regulacion(parametros_cambiados)
+            nivel, motivo_nivel, piezas = _nivel_regulacion(parametros_cambiados)
             motivo = "Código se reubica en otra posición"
             if parametros_cambiados:
                 motivo += "; " + motivo_nivel
@@ -671,6 +697,7 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             # sería comparar contra sí mismo.
             nivel = NIVEL_NO_APLICA
             motivo = "Código deja de existir en el producto destino"
+            piezas = [c for c in parametros_cambiados if c in PIEZAS_GUIA]
 
         detalle.append({
             "Posición": pos,
@@ -678,7 +705,9 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             "Código Destino": codigo_b if pd.notna(codigo_b) else "-",
             "Categoría": categoria,
             "Nivel": nivel,
-            "Motivo": motivo
+            "Motivo": motivo,
+            "Piezas": piezas,
+            "Parámetros": parametros_cambiados,
         })
 
     # Los conteos cubren solo las posiciones del tren (POSICIONES_LINEA). `DU`
@@ -925,6 +954,151 @@ def mostrar_info_familia(producto, df_ddp, label):
     except Exception as e:
         logger.error(f"Error mostrando familia: {str(e)}")
 
+def mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones):
+    """Las 4 métricas de intervención por stand.
+
+    Función única para que los dos modos muestren exactamente los mismos
+    números: si cada vista armara sus métricas, podrían divergir.
+    """
+    col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+    with col_r1:
+        st.metric("Cambios completos de stand", cambios_completos)
+    with col_r2:
+        st.metric("Regulaciones fuertes", reg_fuertes,
+                  help="Además del ajuste hay que cambiar una pieza de guía: "
+                       "caja guía, embudo, polín, canteo, semiguía, raspador, "
+                       "rodamiento o ángulo diagonal.")
+    with col_r3:
+        st.metric("Regulaciones leves", reg_leves,
+                  help="El stand se ajusta donde está: cambia la calibración "
+                       "(material, luz) o un ajuste de la guía ya montada.")
+    with col_r4:
+        st.metric("Stands intervenidos", cambios_completos + regulaciones)
+
+
+def _orden_stand(posicion):
+    """Clave de orden para que los stands salgan en la secuencia de la línea.
+
+    La secuencia canónica es DU → M1..M4 → A1..A6. Ordenar alfabéticamente
+    pondría A1 antes que M1, o sea el final del tren antes del principio, que
+    es justo al revés de como se recorre el cambio en planta.
+    """
+    if posicion == "DU":
+        return -1
+    try:
+        return POSICIONES_LINEA.index(posicion)
+    except ValueError:
+        return len(POSICIONES_LINEA)
+
+
+def _tabla_laminacion(detalle, categoria, nivel=None):
+    """Filas del detalle de una categoría (y nivel), en orden de línea.
+
+    Acota a `POSICIONES_LINEA` igual que `contar_regulaciones`, para que lo
+    listado y lo contado nunca puedan diferir. `DU` se trata aparte.
+    """
+    filas = [
+        d for d in detalle or []
+        if d.get("Posición") in POSICIONES_LINEA
+        and d.get("Categoría") == categoria
+        and (nivel is None or d.get("Nivel") == nivel)
+    ]
+    return sorted(filas, key=lambda d: _orden_stand(d.get("Posición")))
+
+
+def mostrar_resumen_laminacion(detalle):
+    """Vista por stand del cambio, para quien lo opera en línea.
+
+    Responde tres preguntas, en el orden en que importan en el laminador:
+      1. ¿Qué stand se cambia completo, y de qué código a qué código?
+      2. ¿Qué stand se regula fuerte, y qué guías hay que cambiar?
+      3. ¿Qué stand se regula leve?
+
+    Sale íntegramente del detalle de `clasificar_cambios_codigo_canal`: es
+    presentación, no un cálculo nuevo. Los stands sin diferencias no aparecen
+    —no hay nada que hacer en ellos— y por eso la suma de las tres tablas es
+    igual a "Stands intervenidos" de la sección Resumen.
+    """
+    completos = _tabla_laminacion(detalle, "Cambio completo")
+    fuertes = _tabla_laminacion(detalle, "Regulación", NIVEL_FUERTE)
+    leves = _tabla_laminacion(detalle, "Regulación", NIVEL_LEVE)
+
+    # --- 1. Cambio completo ---
+    st.markdown(f"#### Cambio completo — {len(completos)} stand(s)")
+    st.caption(
+        "El código de canal deja de existir en el producto destino: hay que "
+        "bajar el stand y montar otro ya preparado."
+    )
+    if completos:
+        st.dataframe(
+            pd.DataFrame([{
+                "Stand": d["Posición"],
+                "Código actual": str(d["Código Origen"]),
+                "Código nuevo": str(d["Código Destino"]),
+                # Un destino `F` no es un montaje: la posición queda vacía, así
+                # que ese stand se LIBERA. Decirlo acá evita que se prepare un
+                # stand que nadie va a montar (§6.10).
+                "Observación": ("Pase falso: la posición queda vacía, el stand se libera"
+                                if _es_pase_falso(d["Código Destino"]) else "Montar stand preparado"),
+            } for d in completos]),
+            width="stretch", hide_index=True
+        )
+    else:
+        st.success("Ningún stand requiere cambio completo.")
+
+    # --- 2. Regulación fuerte ---
+    st.markdown(f"#### Regulación fuerte — {len(fuertes)} stand(s)")
+    st.caption(
+        "El stand se queda en línea, pero hay que cambiarle una pieza de guía: "
+        "buscarla, desarmar y montar."
+    )
+    if fuertes:
+        st.dataframe(
+            pd.DataFrame([{
+                "Stand": d["Posición"],
+                "Código": str(d["Código Origen"]),
+                "Guías a cambiar": ", ".join(d.get("Piezas") or []) or "—",
+                "Además se ajusta": ", ".join(
+                    [p for p in (d.get("Parámetros") or []) if p not in PIEZAS_GUIA]
+                ) or "—",
+            } for d in fuertes]),
+            width="stretch", hide_index=True
+        )
+    else:
+        st.success("Ningún stand requiere cambio de piezas de guía.")
+
+    # --- 3. Regulación leve ---
+    st.markdown(f"#### Regulación leve — {len(leves)} stand(s)")
+    st.caption("El stand se ajusta donde está, sin cambiar piezas.")
+    if leves:
+        st.dataframe(
+            pd.DataFrame([{
+                "Stand": d["Posición"],
+                "Código": str(d["Código Origen"]),
+                "Qué se ajusta": ", ".join(d.get("Parámetros") or []) or "—",
+            } for d in leves]),
+            width="stretch", hide_index=True
+        )
+    else:
+        st.success("Ningún stand requiere regulación leve.")
+
+    # --- Desbaste, aparte y sin contarse ---
+    # `DU` se muestra porque el operador necesita verlo, pero no entra en los
+    # conteos del tren: es desbaste y no compite por los stands (§6.10).
+    du = [d for d in detalle or [] if d.get("Posición") == "DU"]
+    if du:
+        with st.expander("Desbaste (DU) — se muestra, no se cuenta como stand del tren"):
+            st.dataframe(
+                pd.DataFrame([{
+                    "Código actual": str(d["Código Origen"]),
+                    "Código nuevo": str(d["Código Destino"]),
+                    "Intervención": d["Categoría"],
+                    "Motivo": d["Motivo"],
+                } for d in du]),
+                width="stretch", hide_index=True
+            )
+
+
 def mostrar_metricas_resumen(df_cambios):
     """Muestra métricas de resumen de cambios."""
     try:
@@ -1108,15 +1282,49 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             with col_t2:
                 st.info(f"**{producto_b} → {producto_a}:** {tiempo_ba} min")
         
-        # Opción de filtro encima de las tablas
+        # Comparación técnica (DDP)
         st.markdown("---")
+        st.markdown("### Análisis Técnico")
+
+        # La misma comparación, dos lecturas. Taller es el default a propósito:
+        # es la vista histórica, así que quien ya usa la app no ve nada distinto
+        # hasta que cambia el modo deliberadamente.
+        modo_analisis = st.segmented_control(
+            "Modo de lectura",
+            options=[MODO_TALLER, MODO_LAMINACION],
+            default=MODO_TALLER,
+            required=True,          # sin esto, un clic sobre la opción activa la deselecciona
+            key="modo_analisis",
+            help="**Taller**: el detalle componente por componente, para preparar el stand. "
+                 "**Laminación**: qué hay que hacer en cada stand, agrupado por tipo de "
+                 "intervención.",
+        )
+
+        # Se clasifica UNA sola vez y la usan los dos modos. Que ambos lean el
+        # mismo detalle es lo que garantiza que no puedan mostrar cifras
+        # distintas del mismo cambio.
+        try:
+            cambios_completos, regulaciones, detalle_reg = clasificar_cambios_codigo_canal(df_a, df_b)
+            reg_leves, reg_fuertes = contar_regulaciones(detalle_reg)
+        except Exception as e:
+            logger.error(f"Error clasificando cambios de stand: {str(e)}")
+            cambios_completos, regulaciones = 0, 0
+            reg_leves, reg_fuertes = 0, 0
+            detalle_reg = []
+
+        if modo_analisis == MODO_LAMINACION:
+            mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones)
+            st.markdown("---")
+            mostrar_resumen_laminacion(detalle_reg)
+            return
+
+        # ---- De aquí en adelante, modo Taller (vista original) ----
+
+        # Opción de filtro encima de las tablas
         col_filtro, col_space = st.columns([1, 3])
         with col_filtro:
             mostrar_solo_cambios = st.checkbox("Solo mostrar cambios", value=True, key="filtro_tablas")
-        
-        # Comparación técnica (DDP)
-        st.markdown("### Análisis Técnico")
-        
+
         columnas_ddp = [col for col in df_a.columns if col not in ["STD", "Producto", "Familia"]]
 
         # Se inicializa antes del `if`: la sección Resumen la lee más abajo y sin
@@ -1190,30 +1398,11 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             "compara por familia y es otra unidad de análisis."
         )
 
-        # Intervención por stand. `clasificar_cambios_codigo_canal` ya restringe sus
-        # conteos a POSICIONES_LINEA (§6.10), así que DU queda fuera por construcción.
-        try:
-            cambios_completos, regulaciones, detalle_reg = clasificar_cambios_codigo_canal(df_a, df_b)
-            reg_leves, reg_fuertes = contar_regulaciones(detalle_reg)
-        except Exception as e:
-            logger.error(f"Error clasificando cambios de stand: {str(e)}")
-            cambios_completos, regulaciones = 0, 0
-            reg_leves, reg_fuertes = 0, 0
-
-        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
-        with col_r1:
-            st.metric("Cambios completos de stand", cambios_completos)
-        with col_r2:
-            st.metric("Regulaciones fuertes", reg_fuertes,
-                      help="Además del ajuste hay que cambiar una pieza de guía: "
-                           "caja guía, embudo, polín, canteo, semiguía, raspador, "
-                           "rodamiento o ángulo diagonal.")
-        with col_r3:
-            st.metric("Regulaciones leves", reg_leves,
-                      help="El stand se ajusta donde está: cambia la calibración "
-                           "(material, luz) o un ajuste de la guía ya montada.")
-        with col_r4:
-            st.metric("Stands intervenidos", cambios_completos + regulaciones)
+        # Intervención por stand. Se clasificó una sola vez al entrar al Análisis
+        # Técnico y ese resultado se reusa acá: `clasificar_cambios_codigo_canal`
+        # ya restringe sus conteos a POSICIONES_LINEA (§6.10), así que DU queda
+        # fuera por construcción.
+        mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones)
 
         # La tabla por componente sale SOLO del diagrama de pase y SOLO de las
         # posiciones del tren. `df_desbaste_cmp` ya no se concatena.
