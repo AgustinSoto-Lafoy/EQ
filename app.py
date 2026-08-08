@@ -145,6 +145,27 @@ def _es_hoja_ddp(columnas):
     return "producto" in cols and "std" in cols and tiene_codigo
 
 
+def _es_hoja_condiciones(columnas):
+    """Condiciones de laminación del pie del formulario: Producto · Parámetro · Valor."""
+    cols = _columnas_normalizadas(columnas)
+    return "producto" in cols and any(c.startswith("par") and "metro" in c for c in cols) \
+        and "valor" in cols
+
+
+def _es_hoja_observaciones(columnas):
+    """Observaciones numeradas al pie del Diagrama de Pase."""
+    cols = _columnas_normalizadas(columnas)
+    return "producto" in cols and "texto" in cols
+
+
+def _es_hoja_versiones(columnas):
+    """Metadatos del formulario: qué versión del DP es y de qué fecha."""
+    cols = _columnas_normalizadas(columnas)
+    tiene_version = any(c in ("versión", "version") for c in cols)
+    tiene_fecha = any("fecha" in c for c in cols)
+    return "producto" in cols and tiene_version and tiene_fecha
+
+
 def _buscar_hoja(ruta, criterio):
     """Primera hoja de `ruta` cuyas columnas cumplen `criterio`.
 
@@ -160,6 +181,33 @@ def _buscar_hoja(ruta, criterio):
         if criterio(encabezado.columns):
             return hoja, pd.read_excel(xls, sheet_name=hoja), hojas
     return None, None, hojas
+
+
+@st.cache_data(ttl=3600)
+def cargar_hojas_dp():
+    """Hojas del pie del Diagrama de Pase: condiciones, observaciones y versiones.
+
+    Va aparte de `cargar_datos` para no tocarle la firma: esa función devuelve 4
+    valores y la leen varias pantallas. Agregarle tres más obligaría a cambiar
+    todos los llamadores a la vez, que es el modo de falla de §6.14.
+
+    Las tres son OPCIONALES por diseño. Un Consolidado que no las traiga —el
+    vigente hasta hoy no las tenía— sigue funcionando: la vista lo dice y muestra
+    lo que sí hay. Se ubican por CONTENIDO, nunca por nombre ni posición (§6.9).
+    """
+    hojas = {}
+    for clave, criterio in (("condiciones", _es_hoja_condiciones),
+                            ("observaciones", _es_hoja_observaciones),
+                            ("versiones", _es_hoja_versiones)):
+        try:
+            nombre, df, _ = _buscar_hoja("data/Consolidado_Laminador.xlsx", criterio)
+            hojas[clave] = df
+            if df is not None:
+                logger.info(f"Hoja de {clave} detectada: '{nombre}'")
+        except Exception as e:
+            logger.error(f"Error cargando hoja de {clave}: {str(e)}")
+            hojas[clave] = None
+    return hojas
 
 
 @st.cache_data(ttl=3600)  # Cache por 1 hora
@@ -954,6 +1002,370 @@ def mostrar_info_familia(producto, df_ddp, label):
     except Exception as e:
         logger.error(f"Error mostrando familia: {str(e)}")
 
+# =====================================
+# DIAGRAMA DE PASE CON FORMATO
+# =====================================
+# Reproduce el formulario F-PGLAM101-06 con el que operaciones lee el DP en papel.
+# El formato NO es cosmético: quien lo usa lleva años leyendo esa disposición, y una
+# tabla con las mismas columnas en otro orden obliga a re-aprenderla.
+#
+# La estructura es de dos filas por stand — entrada `E` y salida `S` — con STD,
+# código, material, luz, tolerancia y CTE combinados verticalmente sobre ambas.
+# Por eso se arma en HTML y no con `st.dataframe`: hace falta `rowspan`, y un
+# dataframe no combina celdas.
+
+# Componentes del utilaje, en el orden del formulario impreso.
+COMPONENTES_DP = [
+    ("Caja Guía", "CAJA GUÍA"),
+    ("Embudo", "EMBUDOS"),
+    ("Código Polín", "POLÍN"),
+    ("Diámetro Min - Max", "DIÁMETRO<br>MÁX - MÍN"),
+    ("Ángulo Diagonal", "DIAGONAL<br>ÁNGULO"),
+    ("Canteo", "CANTEO"),
+    ("Estabilización", "ESTABILIZ"),
+    ("Rodamiento", "RODAM."),
+    ("Semiguía", "SEMIGUÍA"),
+    ("Raspador", "RASPADOR"),
+]
+
+# Paleta del diagrama. Se fija `color` junto con `background-color` en cada regla:
+# sin color de texto explícito, en modo oscuro queda claro sobre claro (§6.13).
+DP_COLORES = {
+    "encabezado": ("#1f4e79", "#ffffff"),   # franja de títulos
+    "grupo": ("#dce6f1", "#1a1a1a"),        # sub-encabezados
+    "std": ("#f2f2f2", "#1a1a1a"),          # columna de posición
+    "entrada": ("#ffffff", "#1a1a1a"),
+    "salida": ("#fafafa", "#1a1a1a"),
+    "desbaste": ("#fff2cc", "#1a1a1a"),     # la fila DU, que no es del tren
+}
+
+
+def _txt(valor):
+    """Celda a texto para mostrar. El nulo del utilaje es semántico —'no hay esa
+    herramienta en el pase'— así que se muestra VACÍO, no como 'nan' ni '-'."""
+    if valor is None:
+        return ""
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    texto = str(valor).strip()
+    return "" if texto.lower() in ("nan", "none", "nat") else texto
+
+
+def _dp_filas_ordenadas(df_producto):
+    """Filas del producto en la secuencia de la línea (DU → M1..M4 → A1..A6).
+
+    No se rellenan los stands ausentes: no todos los productos recorren los 11 y
+    inventar una fila vacía sería inventar un pase (§5).
+    """
+    orden = ["DU"] + list(POSICIONES_LINEA)
+    filas = []
+    for pos in orden:
+        for _, fila in df_producto[df_producto["STD"] == pos].iterrows():
+            filas.append(fila)
+    # Cualquier STD que no esté en la secuencia canónica va al final, visible:
+    # descartarlo en silencio escondería un dato que alguien escribió.
+    conocidos = set(orden)
+    for _, fila in df_producto[~df_producto["STD"].isin(conocidos)].iterrows():
+        filas.append(fila)
+    return filas
+
+
+def construir_diagrama_pase(df_ddp, producto, hojas_dp=None):
+    """Arma el diagrama de un producto desde el Consolidado y sus hojas de pie.
+
+    Devuelve un dict con todo lo que necesitan la vista y el PDF, para que ambos
+    salgan del MISMO armado: si cada salida consultara por su cuenta, la pantalla
+    y el papel podrían mostrar cosas distintas del mismo producto.
+    """
+    df_producto = df_ddp[df_ddp["Producto"] == producto]
+    filas = _dp_filas_ordenadas(df_producto)
+
+    familia = ""
+    if not df_producto.empty and "Familia" in df_producto.columns:
+        familia = _txt(df_producto["Familia"].iloc[0])
+
+    hojas_dp = hojas_dp or {}
+    version, fecha_dp = "", ""
+    df_ver = hojas_dp.get("versiones")
+    if df_ver is not None and "Producto" in df_ver.columns:
+        sub = df_ver[df_ver["Producto"] == producto]
+        # Si hay varias versiones se muestra la vigente: es la que se está laminando.
+        if "Vigente" in sub.columns and (sub["Vigente"].astype(str) == "Sí").any():
+            sub = sub[sub["Vigente"].astype(str) == "Sí"]
+        if not sub.empty:
+            version = _txt(sub.iloc[0].get("Versión"))
+            fecha_dp = _txt(sub.iloc[0].get("Fecha DP"))[:10]
+
+    condiciones = []
+    df_cond = hojas_dp.get("condiciones")
+    if df_cond is not None and "Producto" in df_cond.columns:
+        for _, r in df_cond[df_cond["Producto"] == producto].iterrows():
+            condiciones.append((_txt(r.get("Grupo")), _txt(r.get("Parámetro")),
+                                _txt(r.get("Valor"))))
+
+    observaciones = []
+    df_obs = hojas_dp.get("observaciones")
+    if df_obs is not None and "Producto" in df_obs.columns:
+        sub = df_obs[df_obs["Producto"] == producto]
+        if "N°" in sub.columns:
+            sub = sub.sort_values("N°")
+        observaciones = [_txt(r.get("Texto")) for _, r in sub.iterrows()]
+
+    return {
+        "producto": producto,
+        "familia": familia,
+        "version": version,
+        "fecha_dp": fecha_dp,
+        "filas": filas,
+        "condiciones": condiciones,
+        "observaciones": observaciones,
+    }
+
+
+def _celda(contenido, fondo, texto, extra=""):
+    return (f'<td style="background-color:{fondo};color:{texto};border:1px solid #999;'
+            f'padding:2px 5px;font-size:11px;{extra}">{contenido}</td>')
+
+
+def diagrama_pase_html(diagrama):
+    """El diagrama como tabla HTML con el layout del formulario impreso."""
+    fondo_enc, texto_enc = DP_COLORES["encabezado"]
+    fondo_grp, texto_grp = DP_COLORES["grupo"]
+
+    cols_pase = ["STD", "CÓDIGO<br>CANAL", "MATERIAL", "LUZ", "TOL.<br>+/-", "CTE.<br>%", "POS."]
+    encabezado = "".join(
+        f'<th style="background-color:{fondo_enc};color:{texto_enc};border:1px solid #999;'
+        f'padding:3px 5px;font-size:10px;text-align:center;">{c}</th>'
+        for c in cols_pase + [etiqueta for _, etiqueta in COMPONENTES_DP]
+    )
+
+    cuerpo = []
+    for fila in diagrama["filas"]:
+        std = _txt(fila.get("STD"))
+        es_desbaste = std == "DU"
+        clave_fondo = "desbaste" if es_desbaste else "std"
+        fondo_std, texto_std = DP_COLORES[clave_fondo]
+
+        # Las 6 primeras columnas son del PASE y se combinan sobre las dos filas
+        # E/S. `rowspan` es un atributo del `<td>`, no una regla de estilo, así que
+        # estas celdas no pueden salir de `_celda`.
+        compartidas = "".join(
+            f'<td rowspan="2" style="background-color:{fondo_std};color:{texto_std};'
+            f'border:1px solid #999;padding:2px 5px;font-size:11px;text-align:center;'
+            f'font-weight:{"600" if campo in ("STD", "Código Canal") else "400"};">'
+            f'{_txt(fila.get(campo))}</td>'
+            for campo in ("STD", "Código Canal", "Material", "Luz", "Tolerancia", "CTE %")
+        )
+
+        for posicion, etiqueta in (("Entrada", "E"), ("Salida", "S")):
+            fondo, texto = DP_COLORES["desbaste" if es_desbaste else
+                                      ("entrada" if posicion == "Entrada" else "salida")]
+            celdas = [f'<td style="background-color:{fondo_grp};color:{texto_grp};'
+                      f'border:1px solid #999;padding:2px 5px;font-size:11px;'
+                      f'text-align:center;font-weight:600;">{etiqueta}</td>']
+            for componente, _ in COMPONENTES_DP:
+                celdas.append(_celda(_txt(fila.get(f"{componente} {posicion}")), fondo, texto))
+            if posicion == "Entrada":
+                cuerpo.append("<tr>" + compartidas + "".join(celdas) + "</tr>")
+            else:
+                cuerpo.append("<tr>" + "".join(celdas) + "</tr>")
+
+    return (
+        '<div style="overflow-x:auto;">'
+        '<table style="border-collapse:collapse;width:100%;font-family:sans-serif;">'
+        f"<thead><tr>{encabezado}</tr></thead>"
+        f'<tbody>{"".join(cuerpo)}</tbody>'
+        "</table></div>"
+    )
+
+
+def _latin1(texto):
+    """Texto apto para fpdf 1.7.2, que escribe en latin-1 y no en UTF-8.
+
+    Medido sobre todas las tablas del modelo: el único carácter fuera de latin-1
+    es `→` (6 apariciones). Se traduce en vez de perderse. El `errors="replace"`
+    final es la red para lo que aparezca mañana: un PDF con un carácter raro es
+    molesto, uno que revienta al descargar deja al usuario sin nada.
+    """
+    if texto is None:
+        return ""
+    texto = str(texto)
+    for origen, destino in (("→", "->"), ("←", "<-"), ("–", "-"), ("—", "-"),
+                            ("“", '"'), ("”", '"'), ("’", "'")):
+        texto = texto.replace(origen, destino)
+    return texto.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def diagrama_pase_pdf(diagrama):
+    """El diagrama como PDF horizontal a color. Devuelve bytes."""
+    from fpdf import FPDF
+
+    ANCHOS = [11, 20, 26, 12, 11, 10, 8]          # STD..POS
+    ANCHOS += [20, 18, 18, 21, 17, 15, 15, 14, 20, 20]   # los 10 componentes
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=8)
+    pdf.add_page()
+    pdf.set_margins(6, 8, 6)
+
+    # --- encabezado del formulario ---
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(31, 78, 121)
+    pdf.cell(0, 7, _latin1("DIAGRAMA DE PASES"), ln=1)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(0, 0, 0)
+    meta = f"FAMILIA: {diagrama['familia']}    PRODUCTO: {diagrama['producto']}"
+    if diagrama["version"]:
+        meta += f"    VERSIÓN DP: {diagrama['version']}"
+    if diagrama["fecha_dp"]:
+        meta += f"    FECHA: {diagrama['fecha_dp']}"
+    pdf.cell(0, 5, _latin1(meta), ln=1)
+    pdf.ln(1.5)
+
+    # --- encabezado de la tabla ---
+    titulos = ["STD", "CÓDIGO", "MATERIAL", "LUZ", "TOL.", "CTE%", "POS"]
+    titulos += [e.replace("<br>", " ") for _, e in COMPONENTES_DP]
+    pdf.set_font("Helvetica", "B", 6)
+    pdf.set_fill_color(31, 78, 121)
+    pdf.set_text_color(255, 255, 255)
+    for ancho, titulo in zip(ANCHOS, titulos):
+        pdf.cell(ancho, 6, _latin1(titulo), border=1, align="C", fill=True)
+    pdf.ln()
+
+    # --- cuerpo: dos filas por stand ---
+    pdf.set_text_color(0, 0, 0)
+    for fila in diagrama["filas"]:
+        std = _txt(fila.get("STD"))
+        es_desbaste = std == "DU"
+        for posicion, etiqueta in (("Entrada", "E"), ("Salida", "S")):
+            if es_desbaste:
+                pdf.set_fill_color(255, 242, 204)      # el desbaste, distinguible
+            elif posicion == "Entrada":
+                pdf.set_fill_color(255, 255, 255)
+            else:
+                pdf.set_fill_color(245, 245, 245)
+            # fpdf no combina celdas: el dato del pase se escribe en la fila de
+            # entrada y la de salida lo deja en blanco. Es la convención del
+            # formulario impreso, donde la celda combinada se lee igual.
+            pdf.set_font("Helvetica", "B" if posicion == "Entrada" else "", 6)
+            for ancho, campo in zip(ANCHOS[:6],
+                                    ("STD", "Código Canal", "Material", "Luz",
+                                     "Tolerancia", "CTE %")):
+                valor = _txt(fila.get(campo)) if posicion == "Entrada" else ""
+                pdf.cell(ancho, 5, _latin1(valor)[:16], border=1, align="C", fill=True)
+            pdf.set_font("Helvetica", "B", 6)
+            pdf.cell(ANCHOS[6], 5, etiqueta, border=1, align="C", fill=True)
+            pdf.set_font("Helvetica", "", 6)
+            for ancho, (componente, _) in zip(ANCHOS[7:], COMPONENTES_DP):
+                valor = _txt(fila.get(f"{componente} {posicion}"))
+                pdf.cell(ancho, 5, _latin1(valor)[:14], border=1, align="C", fill=True)
+            pdf.ln()
+
+    # --- condiciones de laminación ---
+    if diagrama["condiciones"]:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(31, 78, 121)
+        pdf.cell(0, 5, _latin1("CONDICIONES DE LAMINACIÓN"), ln=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 6.5)
+        pdf.set_fill_color(220, 230, 241)
+        for i, (grupo, parametro, valor) in enumerate(diagrama["condiciones"]):
+            etiqueta = f"{grupo} · {parametro}" if grupo else parametro
+            pdf.cell(70, 4.5, _latin1(etiqueta)[:52], border=1, fill=True)
+            pdf.cell(40, 4.5, _latin1(valor)[:28], border=1)
+            if i % 3 == 2:
+                pdf.ln()
+        if len(diagrama["condiciones"]) % 3:
+            pdf.ln()
+
+    # --- observaciones ---
+    if diagrama["observaciones"]:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(31, 78, 121)
+        pdf.cell(0, 5, _latin1("OBSERVACIONES"), ln=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 6.5)
+        for texto in diagrama["observaciones"]:
+            pdf.multi_cell(0, 4, _latin1(texto))
+
+    salida = pdf.output(dest="S")
+    # fpdf 1.7.2 devuelve `str` en Python 3; el PDF ya está en latin-1.
+    return salida.encode("latin-1") if isinstance(salida, str) else bytes(salida)
+
+
+def mostrar_diagrama_pase(df_ddp):
+    """Pestaña: el Diagrama de Pase de un producto, con el formato del formulario."""
+    st.markdown("### Diagrama de Pase")
+    st.caption(
+        "El diagrama se arma consultando el Consolidado y sus hojas de condiciones, "
+        "observaciones y versiones. No es un archivo guardado: se construye al momento."
+    )
+
+    if df_ddp is None or df_ddp.empty or "Producto" not in df_ddp.columns:
+        st.error("No hay diagramas de pase cargados.")
+        return
+
+    productos = sorted(df_ddp["Producto"].dropna().unique())
+    # `format_func` es obligatorio: 9 de los 146 productos traen espacios dobles y
+    # sin esto no se encuentran al escribir (§6.18).
+    producto = st.selectbox("Producto", productos, key="dp_producto",
+                            format_func=etiqueta_producto)
+    if not producto:
+        return
+
+    hojas_dp = cargar_hojas_dp()
+    diagrama = construir_diagrama_pase(df_ddp, producto, hojas_dp)
+
+    faltantes = [n for n, c in (("condiciones", "condiciones"),
+                                ("observaciones", "observaciones"),
+                                ("versiones", "versiones")) if hojas_dp.get(c) is None]
+    if faltantes:
+        st.info(
+            "El Consolidado cargado no trae hoja de " + ", ".join(faltantes) +
+            ". El diagrama se muestra igual, con la tabla de pases."
+        )
+
+    cab = [f"**Familia:** {diagrama['familia'] or '—'}", f"**Producto:** {producto}"]
+    if diagrama["version"]:
+        cab.append(f"**Versión DP:** {diagrama['version']}")
+    if diagrama["fecha_dp"]:
+        cab.append(f"**Fecha:** {diagrama['fecha_dp']}")
+    st.markdown(" · ".join(cab))
+
+    st.markdown(diagrama_pase_html(diagrama), unsafe_allow_html=True)
+
+    if diagrama["condiciones"]:
+        st.markdown("#### Condiciones de laminación")
+        st.dataframe(
+            pd.DataFrame([{"Grupo": g, "Parámetro": p, "Valor": v}
+                          for g, p, v in diagrama["condiciones"]]),
+            width="stretch", hide_index=True
+        )
+
+    if diagrama["observaciones"]:
+        st.markdown("#### Observaciones")
+        for texto in diagrama["observaciones"]:
+            st.markdown(f"- {texto}")
+
+    try:
+        pdf_bytes = diagrama_pase_pdf(diagrama)
+        st.download_button(
+            "Descargar diagrama en PDF",
+            data=pdf_bytes,
+            file_name=f"DP_{producto.replace('/', '-').replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            key="dp_pdf",
+        )
+    except Exception as e:
+        logger.error(f"Error generando el PDF del diagrama: {str(e)}")
+        st.warning(f"No se pudo generar el PDF: {e}")
+
+
 def mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones):
     """Las 4 métricas de intervención por stand.
 
@@ -1153,35 +1565,42 @@ def main():
     
     # Pestañas principales
     tabs = st.tabs([
-        "Comparador Manual", 
-        "Análisis de Secuencia", 
+        "Diagrama de Pase",
+        "Comparador Manual",
+        "Análisis de Secuencia",
         "Resumen Maestranza",
         "Utilaje"
     ])
-    
-    # PESTAÑA 1: COMPARADOR MANUAL
+
+    # PESTAÑA 1: DIAGRAMA DE PASE
+    # Va primera porque es la consulta más básica —"cómo se lamina este producto"—
+    # y no depende de tener un programa cargado.
     with tabs[0]:
+        mostrar_diagrama_pase(df_ddp)
+
+    # PESTAÑA 2: COMPARADOR MANUAL
+    with tabs[1]:
         st.subheader("Comparación Manual de Productos")
         mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste)
     
-    # PESTAÑA 2: SECUENCIA DE PROGRAMA
-    with tabs[1]:
+    # PESTAÑA 3: SECUENCIA DE PROGRAMA
+    with tabs[2]:
         st.subheader("Análisis de Secuencia de Programa")
         if "df_prog" in st.session_state:
             mostrar_secuencia_programa(df_ddp, df_tiempo)
         else:
             st.info("Por favor carga primero el archivo de programa.")
-    
-    # PESTAÑA 3: MAESTRANZA
-    with tabs[2]:
+
+    # PESTAÑA 4: MAESTRANZA
+    with tabs[3]:
         st.subheader("Resumen Técnico para Maestranza")
         if "df_prog" in st.session_state:
             mostrar_resumen_maestranza(df_ddp, df_rendimiento)
         else:
             st.info("Por favor carga primero el archivo de programa.")
 
-    # PESTAÑA 4: UTILAJE
-    with tabs[3]:
+    # PESTAÑA 5: UTILAJE
+    with tabs[4]:
         st.subheader("Análisis de Utilaje")
         mostrar_analisis_utilaje(df_ddp)
 
