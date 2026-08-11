@@ -684,7 +684,17 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             or "STD" not in df_a.columns or "STD" not in df_b.columns):
         return 0, 0, detalle
 
-    codigos_destino_existentes = set(df_b["Código Canal"].dropna())
+    # Se compara por CLAVE NORMALIZADA, no por el texto crudo. La app ya trataba
+    # `RP 64` y `RP-64` como el MISMO canal al contar cilindros únicos, y como
+    # canales DISTINTOS al clasificar cambios: la misma app, sobre el mismo dato,
+    # con dos respuestas opuestas. Medido sobre el Consolidado vigente, eso
+    # reportaba 1.101 stands como "Cambio completo" siendo el mismo canal escrito
+    # de otra forma, repartidos en 788 de los 11.935 pares de productos. Cada uno
+    # consume un stand del taller y ~2 h de preparación en el análisis de
+    # capacidad, así que no era un detalle de presentación.
+    codigos_destino_existentes = {
+        _normalizar_codigo_canal(c) for c in df_b["Código Canal"].dropna()
+    }
 
     # Columnas de parámetros técnicos a revisar cuando el código NO cambia
     # (todo lo que no sea identificador de posición/producto ni el propio código)
@@ -706,10 +716,10 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
         fila_b = matching_b.iloc[0]
         codigo_b = fila_b["Código Canal"]
 
-        try:
-            mismo_codigo = (codigo_a == codigo_b) or (pd.isna(codigo_a) and pd.isna(codigo_b))
-        except (TypeError, ValueError):
-            mismo_codigo = str(codigo_a) == str(codigo_b)
+        # `None == None` cubre el caso de los dos vacíos sin necesitar `pd.isna`.
+        clave_a = _normalizar_codigo_canal(codigo_a)
+        clave_b = _normalizar_codigo_canal(codigo_b)
+        mismo_codigo = clave_a == clave_b
 
         parametros_cambiados = _parametros_cambiados(row_a, fila_b, columnas_parametros)
 
@@ -733,7 +743,7 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
 
         # El código de canal difiere en esta posición: ¿el stand de origen sigue
         # existiendo en algún lugar del producto destino?
-        if pd.notna(codigo_a) and codigo_a in codigos_destino_existentes:
+        if clave_a is not None and clave_a in codigos_destino_existentes:
             categoria = "Regulación"
             nivel, motivo_nivel, piezas = _nivel_regulacion(parametros_cambiados)
             motivo = "Código se reubica en otra posición"
