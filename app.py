@@ -1127,7 +1127,7 @@ def construir_diagrama_pase(df_ddp, producto, hojas_dp=None):
 
 def _celda(contenido, fondo, texto, extra=""):
     return (f'<td style="background-color:{fondo};color:{texto};border:1px solid #999;'
-            f'padding:2px 5px;font-size:11px;{extra}">{contenido}</td>')
+            f'padding:3px 6px;font-size:12px;white-space:nowrap;{extra}">{contenido}</td>')
 
 
 def diagrama_pase_html(diagrama):
@@ -1138,7 +1138,7 @@ def diagrama_pase_html(diagrama):
     cols_pase = ["STD", "CÓDIGO<br>CANAL", "MATERIAL", "LUZ", "TOL.<br>+/-", "CTE.<br>%", "POS."]
     encabezado = "".join(
         f'<th style="background-color:{fondo_enc};color:{texto_enc};border:1px solid #999;'
-        f'padding:3px 5px;font-size:10px;text-align:center;">{c}</th>'
+        f'padding:3px 6px;font-size:11px;text-align:center;">{c}</th>'
         for c in cols_pase + [etiqueta for _, etiqueta in COMPONENTES_DP]
     )
 
@@ -1154,7 +1154,8 @@ def diagrama_pase_html(diagrama):
         # estas celdas no pueden salir de `_celda`.
         compartidas = "".join(
             f'<td rowspan="2" style="background-color:{fondo_std};color:{texto_std};'
-            f'border:1px solid #999;padding:2px 5px;font-size:11px;text-align:center;'
+            f'border:1px solid #999;padding:3px 6px;font-size:12px;text-align:center;'
+            f'white-space:nowrap;'
             f'font-weight:{"600" if campo in ("STD", "Código Canal") else "400"};">'
             f'{_txt(fila.get(campo))}</td>'
             for campo in ("STD", "Código Canal", "Material", "Luz", "Tolerancia", "CTE %")
@@ -1164,7 +1165,7 @@ def diagrama_pase_html(diagrama):
             fondo, texto = DP_COLORES["desbaste" if es_desbaste else
                                       ("entrada" if posicion == "Entrada" else "salida")]
             celdas = [f'<td style="background-color:{fondo_grp};color:{texto_grp};'
-                      f'border:1px solid #999;padding:2px 5px;font-size:11px;'
+                      f'border:1px solid #999;padding:3px 6px;font-size:12px;'
                       f'text-align:center;font-weight:600;">{etiqueta}</td>']
             for componente, _ in COMPONENTES_DP:
                 celdas.append(_celda(_txt(fila.get(f"{componente} {posicion}")), fondo, texto))
@@ -1173,9 +1174,15 @@ def diagrama_pase_html(diagrama):
             else:
                 cuerpo.append("<tr>" + "".join(celdas) + "</tr>")
 
+    # `width:auto` y no `100%`: con 17 columnas de dato corto —la mediana son 6
+    # caracteres— estirar la tabla al ancho del monitor reparte el sobrante
+    # DENTRO de las celdas y cada una queda a un tercio de contenido. Ajustada
+    # al contenido, el espacio libre queda fuera de la tabla, que se lee como
+    # margen y no como celdas vacías. El `overflow-x` sigue siendo necesario
+    # para pantallas angostas.
     return (
         '<div style="overflow-x:auto;">'
-        '<table style="border-collapse:collapse;width:100%;font-family:sans-serif;">'
+        '<table style="border-collapse:collapse;width:auto;font-family:sans-serif;">'
         f"<thead><tr>{encabezado}</tr></thead>"
         f'<tbody>{"".join(cuerpo)}</tbody>'
         "</table></div>"
@@ -1199,99 +1206,306 @@ def _latin1(texto):
     return texto.encode("latin-1", errors="replace").decode("latin-1")
 
 
+# =====================================
+# PDF DEL DIAGRAMA DE PASE (hoja de terreno)
+# =====================================
+# El PDF se imprime y se PEGA EN PLANTA, con suciedad y gente que no ve de
+# cerca. Eso define todo el diseño: manda el tamaño del DATO de la tabla y el
+# resto se acomoda alrededor. Las medidas de abajo no son gusto, salen de
+# medir los 155 productos del Consolidado:
+#
+#   * CARTA apaisada, no A4. Es más angosta (279 vs 297) pero más alta (216 vs
+#     210) y GANA — 8,7 pt contra 8,4 — porque el límite en A4 era el alto.
+#   * El encabezado de columna lleva fuente PROPIA, menor que el dato. Muchas
+#     columnas las limitaba su rótulo y no su contenido: `ESTABILIZ` pedía
+#     14,1 mm por el título y su dato ocupa 4,1. Soltarlo sube la tabla de
+#     7,9 a 9,0 pt. El rótulo se lee una vez; el dato se lee a diario.
+#   * El pie NO se sacrifica. Se midió achicarlo de 7,5 a 5,5 pt para cederle
+#     alto a la tabla y no compra ni un décimo: en carta el límite es el ancho.
+#   * Se reserva DP_HOLGURA. El ajuste hace crecer la tabla hasta llenar el
+#     hueco, así que sin esto la hoja queda al filo del borde (medido: 104 de
+#     155 productos a menos de 3 mm, varios en 0,0) y una observación que
+#     crezca una línea manda el diagrama a una segunda página.
+DP_PAG_AN, DP_PAG_AL = 279.4, 215.9        # carta apaisada, en mm
+DP_IZQ = DP_DER = 6
+DP_SUP = DP_INF = 7
+DP_ANCHO = DP_PAG_AN - DP_IZQ - DP_DER
+DP_ALTO = DP_PAG_AL - DP_SUP - DP_INF
+DP_RATIO_ENC = 0.70                        # encabezado de columna vs. dato
+DP_FUENTE_MIN, DP_FUENTE_MAX = 6.0, 12.0   # el mínimo es la fuente de antes
+DP_PIE = 7.5
+DP_HOLGURA = 4.0
+DP_AZUL = (31, 78, 121)
+
+DP_CAMPOS_PASE = ("STD", "Código Canal", "Material", "Luz", "Tolerancia", "CTE %")
+
+
+def _dp_titulos():
+    return (["STD", "CÓDIGO", "MATERIAL", "LUZ", "TOL.", "CTE%", "POS"] +
+            [e.replace("<br>", " ") for _, e in COMPONENTES_DP])
+
+
+def _dp_campos():
+    return list(DP_CAMPOS_PASE) + [None] + [c for c, _ in COMPONENTES_DP]
+
+
+def _dp_w(pdf, texto, size, style=""):
+    pdf.set_font("Helvetica", style, size)
+    return pdf.get_string_width(_latin1(texto))
+
+
+def _dp_valores(diagrama, campo):
+    """Los valores de una columna. `None` es la columna POS, que no sale del DDP."""
+    if campo is None:
+        return ["E", "S"]
+    if campo in DP_CAMPOS_PASE:
+        return [_txt(f.get(campo)) for f in diagrama["filas"]]
+    return [_txt(f.get(f"{campo} {p}")) for f in diagrama["filas"]
+            for p in ("Entrada", "Salida")]
+
+
+def _dp_anchos_necesarios(pdf, diagrama, size):
+    """Ancho CRUDO que pide cada columna. Sin repartir sobrante.
+
+    Va aparte de `_dp_anchos_tabla` a propósito: mezclar "lo que necesita" con
+    "lo que se le asigna" hace que al medir se reciba el ancho ya estirado y la
+    restricción no se vea nunca — así se coló una tabla de 303 mm en una hoja
+    de 297 durante el desarrollo.
+    """
+    pad = 0.27 * size
+    nec = []
+    for titulo, campo in zip(_dp_titulos(), _dp_campos()):
+        vals = [v for v in _dp_valores(diagrama, campo) if v]
+        w_dato = max((_dp_w(pdf, v, size, "B" if campo in DP_CAMPOS_PASE else "")
+                      for v in vals), default=0.0)
+        partes = titulo.split(" ") if " " in titulo else [titulo]
+        w_tit = max(_dp_w(pdf, p, size * DP_RATIO_ENC, "B") for p in partes)
+        nec.append(max(w_dato, w_tit) + 2 * pad)
+    return nec
+
+
+def _dp_anchos_tabla(pdf, diagrama, size):
+    """Los anchos ya repartidos para que la tabla llene el ancho de la hoja."""
+    nec = _dp_anchos_necesarios(pdf, diagrama, size)
+    sobra = DP_ANCHO - sum(nec)
+    if sobra > 0:
+        total = sum(nec)
+        nec = [n + sobra * n / total for n in nec]
+    return nec
+
+
+def _dp_alto_fila(size):
+    return 0.88 * size * 25.4 / 72 * 2.2
+
+
+def _dp_contar_lineas(pdf, texto, ancho, size):
+    """Líneas que ocupará `multi_cell`, contadas como las corta él: por palabras.
+
+    Estimarlas con ancho_total/ancho_columna SUBESTIMA —multi_cell no parte
+    palabras al medio— y una línea de más desborda la hoja, porque la tabla se
+    dimensiona para ocupar exactamente lo que sobra.
+    """
+    pdf.set_font("Helvetica", "", size)
+    lineas, actual = 1, ""
+    for palabra in _latin1(texto).split(" "):
+        prueba = f"{actual} {palabra}".strip()
+        if actual and pdf.get_string_width(prueba) > ancho - 2:
+            lineas += 1
+            actual = palabra
+        else:
+            actual = prueba
+    return lineas
+
+
+def _dp_plan_pie(pdf, diagrama, size):
+    """Alto y disposición del pie, SIN dibujar. Se mide antes que la tabla.
+
+    El orden importa: primero se sabe cuánto pide el pie y la tabla se queda
+    con lo que sobra. Al revés, la tabla crece y empuja las observaciones a una
+    segunda página.
+    """
+    pad = 0.5 + 0.22 * size
+    h = 0.88 * size * 25.4 / 72 * 1.9
+    alto = 0.0
+    plan = {"cond": None, "obs": None, "h": h}
+
+    if diagrama["condiciones"]:
+        etiquetas = [f"{g} · {p}" if g else p for g, p, _ in diagrama["condiciones"]]
+        w_et = max(_dp_w(pdf, e, size) for e in etiquetas) + 2 * pad
+        w_va = max((_dp_w(pdf, v, size) for _, _, v in diagrama["condiciones"] if v),
+                   default=0.0) + 2 * pad
+        w_va = max(w_va, 12.0)
+        # Cuántas caben DE VERDAD. Antes eran 3 fijas de 110 mm = 330 mm en una
+        # hoja de 297: el valor de la tercera se dibujaba fuera del papel, y así
+        # se perdían 387 de los 1.177 valores de condición del Consolidado.
+        por_linea = max(1, int(DP_ANCHO // (w_et + w_va)))
+        w_et += (DP_ANCHO - por_linea * (w_et + w_va)) / por_linea
+        plan["cond"] = (w_et, w_va, por_linea)
+        alto += h + 1.5 + math.ceil(len(diagrama["condiciones"]) / por_linea) * h
+
+    if diagrama["observaciones"]:
+        col = (DP_ANCHO - 4) / 2               # dos columnas, como el formulario
+        n_lin = [_dp_contar_lineas(pdf, o, col, size)
+                 for o in diagrama["observaciones"]]
+        izq, der, acumulado, mitad = [], [], 0, sum(n_lin) / 2
+        for obs, n in zip(diagrama["observaciones"], n_lin):
+            # se equilibra por LÍNEAS, no por cantidad: una observación larga
+            # pesa lo que ocupa, no lo que cuenta
+            (izq if acumulado < mitad else der).append((obs, n))
+            acumulado += n
+        plan["obs"] = (col, [o for o, _ in izq], [o for o, _ in der])
+        alto += h + 1.5 + max(sum(n for _, n in izq),
+                              sum(n for _, n in der)) * h
+
+    return alto, plan
+
+
+def _dp_dibujar_pie(pdf, diagrama, size, plan):
+    h = plan["h"]
+    if plan["cond"]:
+        w_et, w_va, por_linea = plan["cond"]
+        pdf.ln(1.5)
+        pdf.set_font("Helvetica", "B", size + 1)
+        pdf.set_text_color(*DP_AZUL)
+        pdf.cell(0, h, _latin1("CONDICIONES DE LAMINACIÓN"), ln=1)
+        pdf.set_text_color(0, 0, 0)
+        for i, (grupo, parametro, valor) in enumerate(diagrama["condiciones"]):
+            if i % por_linea == 0 and i:
+                pdf.ln()
+            pdf.set_font("Helvetica", "", size)
+            pdf.set_fill_color(220, 230, 241)
+            pdf.cell(w_et, h, _latin1(f"{grupo} · {parametro}" if grupo else parametro),
+                     border=1, fill=True)
+            pdf.set_font("Helvetica", "B", size)
+            pdf.set_fill_color(255, 255, 255)
+            pdf.cell(w_va, h, _latin1(valor), border=1, align="C", fill=True)
+        pdf.ln()
+
+    if plan["obs"]:
+        col, izq, der = plan["obs"]
+        pdf.ln(1.5)
+        pdf.set_font("Helvetica", "B", size + 1)
+        pdf.set_text_color(*DP_AZUL)
+        pdf.cell(0, h, _latin1("OBSERVACIONES"), ln=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", size)
+        y0 = pdf.get_y()
+        y_final = y0
+        for j, grupo in enumerate((izq, der)):
+            pdf.set_xy(DP_IZQ + j * (col + 4), y0)
+            for texto in grupo:
+                pdf.set_x(DP_IZQ + j * (col + 4))
+                pdf.multi_cell(col, h, _latin1(texto))
+            y_final = max(y_final, pdf.get_y())
+        pdf.set_xy(DP_IZQ, y_final)
+
+
+def _dp_encabezado(pdf, diagrama):
+    """Banda de título a todo lo ancho, con el PRODUCTO de protagonista.
+
+    Quien busca la hoja pegada en el muro busca el nombre del producto, no el
+    del formulario: por eso el producto va más grande que "DIAGRAMA DE PASES".
+    Verificado que los 155 productos entran a 22 pt sin achicarse.
+    """
+    pdf.set_fill_color(*DP_AZUL)
+    pdf.set_text_color(255, 255, 255)
+    pdf.rect(DP_IZQ, DP_SUP, DP_ANCHO, 15.5, "F")
+
+    pdf.set_xy(DP_IZQ + 3, DP_SUP + 1.2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(60, 4.5, _latin1("DIAGRAMA DE PASES"), ln=0)
+
+    producto = _latin1(diagrama["producto"])
+    size, disponible = 22, DP_ANCHO - 6
+    while size > 10 and _dp_w(pdf, producto, size, "B") > disponible:
+        size -= 0.5
+    pdf.set_xy(DP_IZQ + 3, DP_SUP + 5.2)
+    pdf.set_font("Helvetica", "B", size)
+    pdf.cell(disponible, 9.5, producto, ln=1)
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_xy(DP_IZQ, DP_SUP + 16.2)
+    pdf.set_font("Helvetica", "", 9)
+    meta = [f"FAMILIA: {diagrama['familia'] or '—'}"]
+    if diagrama["version"]:
+        meta.append(f"VERSIÓN DP: {diagrama['version']}")
+    if diagrama["fecha_dp"]:
+        meta.append(f"FECHA: {diagrama['fecha_dp']}")
+    pdf.cell(0, 5, _latin1("     ".join(meta)), ln=1)
+    pdf.ln(0.8)
+
+
 def diagrama_pase_pdf(diagrama):
-    """El diagrama como PDF horizontal a color. Devuelve bytes."""
+    """El diagrama como PDF apaisado a color, en una sola hoja. Devuelve bytes."""
     from fpdf import FPDF
 
-    ANCHOS = [11, 20, 26, 12, 11, 10, 8]          # STD..POS
-    ANCHOS += [20, 18, 18, 21, 17, 15, 15, 14, 20, 20]   # los 10 componentes
-
-    pdf = FPDF(orientation="L", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=8)
+    pdf = FPDF(orientation="L", unit="mm", format="letter")
+    # Se deja ACTIVO a propósito: si algún día algo no cabe, es preferible que
+    # salte de hoja y se vea, antes que se dibuje fuera del papel — que es
+    # justamente el defecto que se está cerrando.
+    pdf.set_auto_page_break(auto=True, margin=DP_INF)
+    pdf.set_margins(DP_IZQ, DP_SUP, DP_DER)
     pdf.add_page()
-    pdf.set_margins(6, 8, 6)
+    _dp_encabezado(pdf, diagrama)
+    y_tabla = pdf.get_y()
 
-    # --- encabezado del formulario ---
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, _latin1("DIAGRAMA DE PASES"), ln=1)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(0, 0, 0)
-    meta = f"FAMILIA: {diagrama['familia']}    PRODUCTO: {diagrama['producto']}"
-    if diagrama["version"]:
-        meta += f"    VERSIÓN DP: {diagrama['version']}"
-    if diagrama["fecha_dp"]:
-        meta += f"    FECHA: {diagrama['fecha_dp']}"
-    pdf.cell(0, 5, _latin1(meta), ln=1)
-    pdf.ln(1.5)
+    h_pie, plan = _dp_plan_pie(pdf, diagrama, DP_PIE)
+    disponible = DP_SUP + DP_ALTO - y_tabla - h_pie - DP_HOLGURA
+    n_filas = 2 * len(diagrama["filas"]) + 1
+
+    # La fuente cumple las DOS restricciones, no una: el ancho de la tabla y el
+    # alto que queda tras el pie. Mirar solo una deja tablas fuera de la hoja.
+    crudo = sum(_dp_anchos_necesarios(pdf, diagrama, DP_FUENTE_MIN))
+    size = min(DP_FUENTE_MAX, DP_FUENTE_MIN * DP_ANCHO / crudo) if crudo else DP_FUENTE_MIN
+    while size > DP_FUENTE_MIN and _dp_alto_fila(size) * n_filas > disponible:
+        size -= 0.1
+    anchos = _dp_anchos_tabla(pdf, diagrama, size)
+    alto = _dp_alto_fila(size)
 
     # --- encabezado de la tabla ---
-    titulos = ["STD", "CÓDIGO", "MATERIAL", "LUZ", "TOL.", "CTE%", "POS"]
-    titulos += [e.replace("<br>", " ") for _, e in COMPONENTES_DP]
-    pdf.set_font("Helvetica", "B", 6)
-    pdf.set_fill_color(31, 78, 121)
+    pdf.set_font("Helvetica", "B", size * DP_RATIO_ENC)
+    pdf.set_fill_color(*DP_AZUL)
     pdf.set_text_color(255, 255, 255)
-    for ancho, titulo in zip(ANCHOS, titulos):
-        pdf.cell(ancho, 6, _latin1(titulo), border=1, align="C", fill=True)
+    for ancho, titulo in zip(anchos, _dp_titulos()):
+        pdf.cell(ancho, alto, _latin1(titulo), border=1, align="C", fill=True)
     pdf.ln()
+    pdf.set_text_color(0, 0, 0)
 
     # --- cuerpo: dos filas por stand ---
-    pdf.set_text_color(0, 0, 0)
     for fila in diagrama["filas"]:
-        std = _txt(fila.get("STD"))
-        es_desbaste = std == "DU"
-        for posicion, etiqueta in (("Entrada", "E"), ("Salida", "S")):
+        es_desbaste = _txt(fila.get("STD")) == "DU"
+        y0 = pdf.get_y()
+
+        # Las 6 columnas del pase van como UNA celda de doble alto. El
+        # formulario Excel no dibuja línea entre E y S en estas columnas
+        # (medido: sin estilo de borde en CÓDIGO..CTE); la división recién
+        # aparece en POS. Antes se dibujaba borde en las dos filas y quedaban
+        # 66 cajitas vacías por hoja bajo cada dato.
+        pdf.set_fill_color(*((255, 242, 204) if es_desbaste else (242, 242, 242)))
+        pdf.set_font("Helvetica", "B", size)
+        x = DP_IZQ
+        for ancho, campo in zip(anchos[:6], DP_CAMPOS_PASE):
+            pdf.set_xy(x, y0)
+            pdf.cell(ancho, alto * 2, _latin1(_txt(fila.get(campo))),
+                     border=1, align="C", fill=True)
+            x += ancho
+
+        for i, (posicion, etiqueta) in enumerate((("Entrada", "E"), ("Salida", "S"))):
             if es_desbaste:
                 pdf.set_fill_color(255, 242, 204)      # el desbaste, distinguible
-            elif posicion == "Entrada":
-                pdf.set_fill_color(255, 255, 255)
             else:
-                pdf.set_fill_color(245, 245, 245)
-            # fpdf no combina celdas: el dato del pase se escribe en la fila de
-            # entrada y la de salida lo deja en blanco. Es la convención del
-            # formulario impreso, donde la celda combinada se lee igual.
-            pdf.set_font("Helvetica", "B" if posicion == "Entrada" else "", 6)
-            for ancho, campo in zip(ANCHOS[:6],
-                                    ("STD", "Código Canal", "Material", "Luz",
-                                     "Tolerancia", "CTE %")):
-                valor = _txt(fila.get(campo)) if posicion == "Entrada" else ""
-                pdf.cell(ancho, 5, _latin1(valor)[:16], border=1, align="C", fill=True)
-            pdf.set_font("Helvetica", "B", 6)
-            pdf.cell(ANCHOS[6], 5, etiqueta, border=1, align="C", fill=True)
-            pdf.set_font("Helvetica", "", 6)
-            for ancho, (componente, _) in zip(ANCHOS[7:], COMPONENTES_DP):
-                valor = _txt(fila.get(f"{componente} {posicion}"))
-                pdf.cell(ancho, 5, _latin1(valor)[:14], border=1, align="C", fill=True)
-            pdf.ln()
+                pdf.set_fill_color(*((255, 255, 255) if posicion == "Entrada"
+                                     else (245, 245, 245)))
+            pdf.set_xy(x, y0 + i * alto)
+            pdf.set_font("Helvetica", "B", size * DP_RATIO_ENC)
+            pdf.cell(anchos[6], alto, etiqueta, border=1, align="C", fill=True)
+            pdf.set_font("Helvetica", "", size)
+            for ancho, (componente, _) in zip(anchos[7:], COMPONENTES_DP):
+                pdf.cell(ancho, alto, _latin1(_txt(fila.get(f"{componente} {posicion}"))),
+                         border=1, align="C", fill=True)
+        pdf.set_xy(DP_IZQ, y0 + 2 * alto)
 
-    # --- condiciones de laminación ---
-    if diagrama["condiciones"]:
-        pdf.ln(2)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(31, 78, 121)
-        pdf.cell(0, 5, _latin1("CONDICIONES DE LAMINACIÓN"), ln=1)
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Helvetica", "", 6.5)
-        pdf.set_fill_color(220, 230, 241)
-        for i, (grupo, parametro, valor) in enumerate(diagrama["condiciones"]):
-            etiqueta = f"{grupo} · {parametro}" if grupo else parametro
-            pdf.cell(70, 4.5, _latin1(etiqueta)[:52], border=1, fill=True)
-            pdf.cell(40, 4.5, _latin1(valor)[:28], border=1)
-            if i % 3 == 2:
-                pdf.ln()
-        if len(diagrama["condiciones"]) % 3:
-            pdf.ln()
-
-    # --- observaciones ---
-    if diagrama["observaciones"]:
-        pdf.ln(2)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(31, 78, 121)
-        pdf.cell(0, 5, _latin1("OBSERVACIONES"), ln=1)
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Helvetica", "", 6.5)
-        for texto in diagrama["observaciones"]:
-            pdf.multi_cell(0, 4, _latin1(texto))
+    _dp_dibujar_pie(pdf, diagrama, DP_PIE, plan)
 
     salida = pdf.output(dest="S")
     # fpdf 1.7.2 devuelve `str` en Python 3; el PDF ya está en latin-1.
