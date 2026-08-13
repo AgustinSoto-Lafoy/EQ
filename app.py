@@ -1828,6 +1828,336 @@ def main():
         st.subheader("Análisis de Utilaje")
         mostrar_analisis_utilaje(df_ddp)
 
+# =====================================
+# MAGNITUD DE CAMBIO
+# =====================================
+# Un plan de trabajo por AREA para un cambio concreto: quien hace que, y en el
+# tren que pasa stand por stand. El formato replica el formulario que hoy se
+# llena a mano (`respaldo data\Magnitud de Cambio LR.xlsx`, 5 hojas reales).
+#
+# Lo que se entrega NO es el documento final: es un PUNTO DE PARTIDA con la
+# informacion del cambio ya cargada. Las areas que no son el tren traen las
+# actividades estandar, y quien lo use borra o completa segun la operacion.
+#
+# Las actividades salen de contar en cuantas de las 5 hojas del ejemplo aparece
+# cada una: se conservan las que se repiten en 3 o mas. Las que aparecen una o
+# dos veces son especificas del cambio ("Habilitar 7mo pase", "Condicion
+# articulada a rotativa", "Cambio embudo entrada T2, de 100 a 150") y por eso NO
+# se escriben: un dato adivinado que ya viene escrito nadie lo revisa, asi que
+# es peor que una fila en blanco.
+RESPONSABLE_TREN = "Op EQ + Laminador + C. Online"
+
+# (area, ((actividad, responsable), ...)). Van como constante y no incrustadas
+# en el generador para que agregar o quitar una actividad sea editar una linea.
+MAGNITUD_AREAS_PRE = (
+    ("PP1", (
+        ("Apoyo en cambio de producto", "Operador Púlpito Principal"),
+        ("Ingresar muestras en horno para quema de canal", "Operador Horno"),
+        ("Apoyo en quema de canal", "Operador Horno"),
+    )),
+)
+
+MAGNITUD_DESBASTE = (
+    ("Calibración de cilindros", "Operador Desbaste"),
+)
+
+# El Tren Acabador se intercala antes de `Cizalla T3`, igual que en el ejemplo:
+# el formulario sigue el recorrido de la linea.
+MAGNITUD_AREAS_POST = (
+    ("Entrada A1", (
+        ("Abrir polines entrada A1 para producto", RESPONSABLE_TREN),
+    )),
+    ("Cizalla T2", ()),
+    ("Cizalla T3", (
+        ("Verificar cambio de condición en cuchilla", "Mecánico de Turno"),
+        ("Regulación de apertura y altura de garza", "Mecánico de Turno"),
+    )),
+    ("Parrilla", (
+        ("Limpieza zona de corte", "Operador T4"),
+        ("5S zona", "Operador T4"),
+    )),
+    ("Cizalla T4", (
+        ("Limpieza despuntes parrilla y gripador", "2 Operadores T4"),
+        ("Cambio de cuchillos", "Operador T4"),
+    )),
+    ("Empaquetado", (
+        ("Apoyo con puente en cambio producto", "2 Operador Empaquetado"),
+        ("Carga de camiones", "1 Operador Empaquetado"),
+    )),
+    ("Pozo 2000", (
+        ("Limpieza pozo", "2 Operadores Empaquetado"),
+    )),
+    ("Grua Horquilla", (
+        ("Carga de palanquillas en producto entrante", "Operador Grúa Horquilla"),
+        ("5S en zona de acopio de palanquillas", "Operador Grúa Horquilla"),
+        ("Traslado de material para apoyo en trabajos de mantenimiento",
+         "Operador Grúa Horquilla"),
+    )),
+)
+
+# Reparto del tren en las dos areas del formulario. Se recorren tal cual, que ya
+# es el orden en que se recorre la linea: ordenar alfabeticamente pondria A1
+# antes que M1, o sea el final del tren antes del principio.
+MAGNITUD_TREN_MEDIO = ("M1", "M2", "M3", "M4")
+MAGNITUD_TREN_ACABADOR = ("A1", "A2", "A3", "A4", "A5", "A6")
+
+# Formato, medido sobre la hoja `KF` del ejemplo. Los colores son theme 8 con
+# tint -0.5 / 0.4 / 0.8, escritos como hex concreto: el tema no viaja dentro de
+# un libro generado desde cero, asi que referenciarlo daria otro color.
+MAG_FUENTE = "Aptos Narrow"
+MAG_TAM = 12
+MAG_AZUL_TITULO = "2E75B6"
+MAG_AZUL_ENCABEZADO = "9DC3E6"
+MAG_AZUL_SUAVE = "DEEBF7"
+MAG_ANCHOS = {"A": 3.0, "B": 17.7, "C": 6.5, "D": 61.1, "E": 39.9}
+MAG_ALTO_FILA = 18.0
+# Caracteres que caben en la columna D antes de partir en dos lineas. La columna
+# mide 61.1 y se deja margen: la unidad de ancho de Excel no es un caracter.
+MAG_CHARS_POR_LINEA = 68
+
+
+def _mag_lineas(texto):
+    """Cuantas lineas ocupa el texto en la columna de actividades."""
+    return max(1, math.ceil(len(str(texto)) / MAG_CHARS_POR_LINEA))
+
+
+def _mag_texto_stand(posicion, detalle_por_pos):
+    """Que se escribe en la columna Actividades para un stand.
+
+    Cuatro casos, y distinguirlos es justamente lo que el operador necesita
+    saber antes de caminar al stand:
+
+      1. El codigo cambia            -> "<origen> a <destino>", tal como el DDP
+         los escribe. No se normaliza: la clave normalizada sirve para cruzar,
+         no para mostrar (§6.22).
+      2. El destino es pase falso    -> ademas se dice que la posicion queda
+         vacia y el stand se LIBERA. Sin eso alguien prepara un stand que nadie
+         va a montar (§6.10).
+      3. Mismo codigo, cambian parametros -> se nombra la regulacion, con las
+         piezas de guia primero porque son la razon del nivel Fuerte.
+      4. Sin diferencias             -> "Mantiene condicion".
+
+    Las piezas y los parametros se leen de las LISTAS del detalle, nunca
+    parseando el `Motivo`: un parser se desincronizaria en silencio en cuanto
+    alguien cambiara esa redaccion (§6.19).
+    """
+    d = detalle_por_pos.get(posicion)
+    if d is None:
+        return "Mantiene condición"
+
+    origen = str(d.get("Código Origen") or "-")
+    destino = str(d.get("Código Destino") or "-")
+    piezas = list(d.get("Piezas") or [])
+    otros = [p for p in (d.get("Parámetros") or []) if p not in piezas]
+
+    if _normalizar_codigo_canal(origen) == _normalizar_codigo_canal(destino):
+        # Mismo codigo: el stand no se mueve, se ajusta donde esta.
+        texto = f"Mantiene {origen}"
+        if piezas:
+            texto += "; cambia guía: " + ", ".join(piezas)
+            if otros:
+                texto += " · además " + ", ".join(otros)
+        elif otros:
+            texto += "; regula " + ", ".join(otros)
+        return texto
+
+    texto = f"{origen} a {destino}"
+    if _es_pase_falso(destino):
+        texto += " · la posición queda vacía, el stand se libera"
+    elif d.get("Categoría") == "Regulación" and not _es_pase_falso(origen):
+        # `Regulacion` con codigo distinto = el codigo sigue existiendo en el
+        # producto destino, en otra posicion. Decirlo evita pedirle un stand
+        # nuevo al taller. Se omite cuando el origen es pase falso: `F` no es un
+        # canal, asi que "se reubica" no significaria nada (§10.12).
+        texto += f" · el canal {origen} se reubica en otra posición"
+    return texto
+
+
+def _mag_filas_tren(posiciones, detalle_por_pos):
+    """Una fila (STD, actividad, responsable) por posicion, en orden de linea."""
+    return [(pos, _mag_texto_stand(pos, detalle_por_pos), RESPONSABLE_TREN)
+            for pos in posiciones]
+
+
+def magnitud_bloques(detalle):
+    """Los bloques del formulario, en el orden del ejemplo.
+
+    Devuelve [(area, [(std, actividad, responsable), ...]), ...]. Se expone
+    aparte del escritor de Excel para poder verificar el CONTENIDO sin abrir un
+    libro: lo que importa comprobar es el texto, no el archivo.
+    """
+    por_pos = {d.get("Posición"): d for d in (detalle or [])}
+
+    desbaste = [(None, act, resp) for act, resp in MAGNITUD_DESBASTE]
+    # El cambio del desbaste va como una fila mas de su area: es informacion del
+    # cambio, aunque `DU` no cuente como stand del tren (§6.10).
+    if "DU" in por_pos:
+        desbaste.append(("DU", _mag_texto_stand("DU", por_pos), "Operador Desbaste"))
+
+    bloques = [(area, [(None, a, r) for a, r in actividades])
+               for area, actividades in MAGNITUD_AREAS_PRE]
+    bloques.append(("Desbaste", desbaste))
+    bloques.append(("Tren Medio", _mag_filas_tren(MAGNITUD_TREN_MEDIO, por_pos)))
+
+    for area, actividades in MAGNITUD_AREAS_POST:
+        if area == "Cizalla T3":
+            bloques.append(("Tren Acabador",
+                            _mag_filas_tren(MAGNITUD_TREN_ACABADOR, por_pos)))
+        # Un area sin actividades estandar igual se emite, con una fila en
+        # blanco: la estructura queda a la vista para completarla a mano.
+        bloques.append((area, [(None, a, r) for a, r in actividades]
+                        or [(None, None, None)]))
+    return bloques
+
+
+def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
+                         detalle, minutos=None, fecha=None):
+    """Arma el Excel de Magnitud de Cambio y lo devuelve como BytesIO.
+
+    `detalle` es el que devuelve `clasificar_cambios_codigo_canal` y llega YA
+    CALCULADO a proposito: si este Excel clasificara por su cuenta podria
+    contradecir las metricas que la pantalla muestra del mismo cambio, que es la
+    leccion de `cb41c68` (§6.19). `minutos` es el de `obtener_tiempo_cambio`, o
+    None si el par no esta registrado.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    def borde(izq="thin", der="thin", arr="thin", aba="thin"):
+        return Border(left=Side(style=izq), right=Side(style=der),
+                      top=Side(style=arr), bottom=Side(style=aba))
+
+    fecha = fecha or datetime.now()
+    bloques = magnitud_bloques(detalle)
+
+    wb = Workbook()
+    ws = wb.active
+    # Las hojas del ejemplo se llaman por el par de familias (`KF`, `IG`).
+    ws.title = f"{familia_a}{familia_b}"[:31] or "Magnitud"
+    ws.sheet_view.showGridLines = False
+
+    for col, ancho in MAG_ANCHOS.items():
+        ws.column_dimensions[col].width = ancho
+
+    base = Font(name=MAG_FUENTE, size=MAG_TAM)
+    negrita = Font(name=MAG_FUENTE, size=MAG_TAM, bold=True)
+    blanca = Font(name=MAG_FUENTE, size=MAG_TAM, bold=True, color="FFFFFF")
+    centro = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    izq = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    # Las combinaciones se juntan aca y se aplican AL FINAL, despues de pintar:
+    # ver el comentario del bloque de combinaciones, mas abajo.
+    merges = ["B2:E2"]
+
+    # --- Titulo ---
+    # El relleno y la fuente van solo en el ancla: un area combinada se dibuja
+    # con el formato de su celda superior izquierda.
+    ws["B2"] = (f"Cambio de familia {familia_a} - {familia_b}, "
+                f"{producto_a} a {producto_b}. [{fecha.strftime('%d/%m/%Y')}]")
+    ws["B2"].font = blanca
+    ws["B2"].fill = PatternFill("solid", fgColor=MAG_AZUL_TITULO)
+    ws["B2"].alignment = centro
+    ws.row_dimensions[2].height = MAG_ALTO_FILA
+
+    # --- Encabezado ---
+    for col, texto in ((2, "Área"), (3, None), (4, "Actividades"), (5, "Responsable")):
+        c = ws.cell(3, col, texto)
+        c.font = negrita
+        c.fill = PatternFill("solid", fgColor=MAG_AZUL_ENCABEZADO)
+        c.alignment = centro
+    ws.row_dimensions[3].height = MAG_ALTO_FILA
+
+    # --- Bloques ---
+    fila = 4
+    for area, filas in bloques:
+        inicio = fila
+        for std, actividad, responsable in filas:
+            ws.cell(fila, 3, std).alignment = centro
+            ws.cell(fila, 4, actividad).alignment = izq
+            ws.cell(fila, 5, responsable).alignment = izq
+            for col in range(2, 6):
+                ws.cell(fila, col).font = base
+            # La altura crece solo si el texto no cabe en una linea. El ejemplo
+            # usa 18 pt fijos, pero ahi los textos son cortos; con wrap y altura
+            # fija un texto largo se corta y no se ve que falta.
+            ws.row_dimensions[fila].height = (
+                MAG_ALTO_FILA * _mag_lineas(actividad) if actividad else MAG_ALTO_FILA
+            )
+            fila += 1
+        ws.cell(inicio, 2, area).alignment = centro
+        if fila - 1 > inicio:
+            merges.append(f"B{inicio}:B{fila - 1}")
+    fin_tabla = fila - 1
+
+    # --- Tiempo de cambio ---
+    ini_tiempo = fin_tabla + 2
+    ws.row_dimensions[fin_tabla + 1].height = 9.0
+    ws.cell(ini_tiempo, 2, "Tiempo de cambio")
+    # Si el par no esta en BBDD_Tiempo el rotulo va sin numero: dejarlo vacio es
+    # informacion; rellenarlo con el tiempo de la direccion inversa no lo es.
+    ws.cell(ini_tiempo, 3,
+            f"Programado: {minutos} minutos" if minutos else "Programado:")
+    ws.cell(ini_tiempo + 1, 3, "Real:")
+    merges.append(f"B{ini_tiempo}:B{ini_tiempo + 1}")
+
+    # --- Nota ---
+    ini_nota = ini_tiempo + 3
+    ws.row_dimensions[ini_tiempo + 2].height = 8.0
+    ws.cell(ini_nota, 2, "NOTA")
+    merges.append(f"B{ini_nota}:B{ini_nota + 1}")
+    ultima = ini_nota + 1
+
+    for r in (ini_tiempo, ini_tiempo + 1, ini_nota, ultima):
+        ws.row_dimensions[r].height = MAG_ALTO_FILA
+        for col in range(2, 6):
+            ws.cell(r, col).font = base
+            ws.cell(r, col).alignment = izq
+    for r in (ini_tiempo, ini_nota):
+        ws.cell(r, 2).fill = PatternFill("solid", fgColor=MAG_AZUL_SUAVE)
+        ws.cell(r, 2).alignment = centro
+
+    # --- Bordes ---
+    # Cuatro bloques separados entre si; cada uno lleva su perimetro en `medium`
+    # y `thin` por dentro. Se pinta al final, sobre las celdas ya escritas, para
+    # no repetir la regla en cada rama de arriba.
+    for arriba, abajo in ((2, 2), (3, fin_tabla), (ini_tiempo, ini_tiempo + 1),
+                          (ini_nota, ultima)):
+        for r in range(arriba, abajo + 1):
+            for col in range(2, 6):
+                ws.cell(r, col).border = borde(
+                    "medium" if col == 2 else "thin",
+                    "medium" if col == 5 else "thin",
+                    "medium" if r == arriba else "thin",
+                    "medium" if r == abajo else "thin",
+                )
+
+    # --- Combinaciones, recien ahora ---
+    # `merge_cells` reemplaza las celdas no-ancla por objetos nuevos y
+    # RECONSTRUYE el borde del area a partir del ancla, asi que lo que se les
+    # haya asignado se pierde. Por eso el ancla tiene que llevar la caja
+    # completa: sus lados izquierdo y superior, y los lados derecho e inferior
+    # de la ultima celda del rango. Sin esto el canto inferior de cada area sale
+    # `thin` donde corresponde `medium`, que es la linea que cierra la tabla.
+    for rango in merges:
+        ini, fin = rango.split(":")
+        a, b = ws[ini], ws[fin]
+        a.border = Border(left=a.border.left, right=b.border.right,
+                          top=a.border.top, bottom=b.border.bottom)
+        ws.merge_cells(rango)
+
+    # --- Impresion ---
+    ws.page_setup.orientation = "landscape"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.print_area = f"B2:E{ultima}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
 def mostrar_comparador_manual(df_ddp, df_tiempo, df_desbaste):
     """Muestra el comparador manual de productos."""
     
@@ -1955,6 +2285,38 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             reg_leves, reg_fuertes = 0, 0
             detalle_reg = []
 
+        # La familia se lee del DDP y no del selector, que puede venir en
+        # "(Todos)". Se calcula aca arriba porque la usan dos cosas: la Magnitud
+        # de Cambio y el analisis de desbaste de mas abajo.
+        familia_real_a = df_a["Familia"].iloc[0] if "Familia" in df_a.columns else familia_a
+        familia_real_b = df_b["Familia"].iloc[0] if "Familia" in df_b.columns else familia_b
+
+        # --- Magnitud de Cambio ---
+        # Va ANTES de la bifurcacion por modo a proposito: la rama Laminacion
+        # hace `return` mas abajo, asi que puesto despues desapareceria en ese
+        # modo. El `try/except` es el mismo criterio que el PDF del Diagrama de
+        # Pase: una falla al armar el archivo avisa, pero no tumba la
+        # comparacion que el operador esta mirando.
+        try:
+            magnitud = magnitud_cambio_xlsx(
+                producto_a, producto_b, familia_real_a, familia_real_b,
+                detalle_reg, tiempo_ab,
+            )
+            st.download_button(
+                "Descargar Magnitud de Cambio",
+                data=magnitud,
+                file_name=(f"Magnitud_{producto_a}_a_{producto_b}.xlsx"
+                           .replace("/", "-").replace(" ", "_")),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="magnitud_xlsx",
+                help="Formulario con el cambio ya cargado stand por stand y las "
+                     "actividades estandar de cada area. El resto se completa a "
+                     "mano segun la operacion.",
+            )
+        except Exception as e:
+            logger.error(f"Error generando la Magnitud de Cambio: {str(e)}")
+            st.warning(f"No se pudo generar la Magnitud de Cambio: {e}")
+
         if modo_analisis == MODO_LAMINACION:
             mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones)
             st.markdown("---")
@@ -2000,10 +2362,10 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         st.markdown("---")
         st.markdown("### Análisis de Diagrama Desbaste")
         
-        # Obtener las familias de los productos seleccionados
-        familia_real_a = df_a["Familia"].iloc[0] if not df_a.empty and "Familia" in df_a.columns else familia_a
-        familia_real_b = df_b["Familia"].iloc[0] if not df_b.empty and "Familia" in df_b.columns else familia_b
-        
+        # `familia_real_a` / `familia_real_b` se calculan una sola vez, mas
+        # arriba: la Magnitud de Cambio las necesita antes de la bifurcacion por
+        # modo, y dos calculos del mismo dato pueden divergir.
+
         # Log para debugging
         logger.info(f"Comparando desbaste: Producto A '{producto_a}' (Familia {familia_real_a}) vs Producto B '{producto_b}' (Familia {familia_real_b})")
         
