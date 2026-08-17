@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import math
 import re
+import unicodedata
 import numpy as np
 from datetime import datetime
 import logging
@@ -1901,6 +1902,167 @@ MAGNITUD_AREAS_POST = (
 MAGNITUD_TREN_MEDIO = ("M1", "M2", "M3", "M4")
 MAGNITUD_TREN_ACABADOR = ("A1", "A2", "A3", "A4", "A5", "A6")
 
+# --- Condiciones de laminacion del pie del Diagrama de Pase ---
+# Viven en la hoja `Condiciones` del Consolidado (Producto · Grupo · Parametro ·
+# Valor) y hasta ahora solo se veian en la pestana Diagrama de Pase. Son
+# EXACTAMENTE lo que el formulario escrito a mano trae y este generador no: la
+# hoja `KF` del ejemplo dice "Condicion articulada a rotativa", que es
+# `Tijera T-3 / Condicion` pasando de `Articulada` a `Rotativa`; la hoja `FA`
+# dice "Condicion rotativa, sin corte de cabeza", que son los dos parametros de
+# ese mismo grupo. Cuando el dato existe se escribe; lo que se deja en blanco
+# sigue siendo lo que NO es derivable.
+#
+# A que area del formulario va cada grupo. El orden de este dict es el orden en
+# que se emiten dentro de su area, y es el de la linea: los tres grupos del tren
+# acabador antes de los cuatro de la T3. Los grupos que no esten aca no se
+# emiten: agregar una condicion nueva es agregar una linea, no tocar el
+# generador.
+MAG_COND_AREA = {
+    "reductores a5/a6": "Tren Acabador",
+    "altura rodillos de reaccion": "Tren Acabador",
+    "posicion estrella de lazo": "Tren Acabador",
+    "tijera t-3": "Cizalla T3",
+    "flap t-3": "Cizalla T3",
+    "garza": "Cizalla T3",
+    # `Cam. Rod.` (camino de rodillos) se agrupa con la T3 por criterio de
+    # operaciones (2026-08-14), no por posicion en la linea.
+    "cam rod": "Cizalla T3",
+}
+
+# Quien responde por la condicion. Sale del area, no del grupo, para que no
+# pueda divergir del responsable de las actividades estandar de esa misma area.
+MAG_COND_RESPONSABLE = {
+    "Tren Acabador": RESPONSABLE_TREN,
+    "Cizalla T3": "Mecánico de Turno",
+}
+
+# Un producto —`CUADRADO 9`— escribe tres de estas condiciones con otra grafia,
+# y ninguna se arregla colapsando espacios: `Camino de rodillos` /
+# `Planchas alojamientos` es el mismo dato que `Cam. Rod.` / `Planchas`. Va como
+# alias explicito y no como regla, porque no hay regla: son dos nombres del
+# mismo equipo. Sin esto ese producto reporta la condicion como que APARECE y
+# DESAPARECE a la vez, que es un cambio inventado.
+MAG_COND_ALIAS = {
+    ("camino de rodillos", "planchas alojamientos"): ("cam rod", "planchas"),
+}
+
+# Como se escribe un valor que no aplica. El dato trae `-`, `--`, `---` y `----`
+# —41 celdas— y son la misma cosa: sin unificarlos, pasar de `-` a `--` se
+# reportaria como cambio de condicion.
+MAG_COND_NO_APLICA = "—"
+
+
+def _mag_norm(texto):
+    """Clave de comparacion de un nombre de grupo o parametro.
+
+    Sin acentos, sin puntos, minuscula, y sin los espacios que rodean a `/` y a
+    `-`: eso reduce `Reductores A5 / A6` y `Reductores A5/A6` a la misma clave, y
+    `Polín - Lengua` a `Polín-Lengua`. Es §6.22 otra vez —se compara por clave y
+    se MUESTRA el texto tal como lo escribe operaciones—, medido: las 15 grafias
+    de la hoja colapsan a las 12 condiciones reales, sin ninguna colision.
+    """
+    t = unicodedata.normalize("NFKD", str(texto))
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    t = t.strip().lower().replace(".", "")
+    t = re.sub(r"\s*([/-])\s*", r"\1", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _mag_clave_cond(grupo, parametro):
+    """`(grupo, parametro)` normalizados, resolviendo los alias declarados."""
+    clave = (_mag_norm(grupo), _mag_norm(parametro))
+    return MAG_COND_ALIAS.get(clave, clave)
+
+
+def _mag_valor_cond(valor):
+    """Valor de una condicion, con los guiones sueltos unificados a 'no aplica'."""
+    v = _txt(valor).strip()
+    if not v or re.fullmatch(r"[-–—]+", v):
+        return MAG_COND_NO_APLICA
+    return v
+
+
+def _mag_indice_cond(condiciones):
+    """De [(grupo, parametro, valor)] a {clave: valor}, mas el orden y la grafia.
+
+    Devuelve `(valores, grafias)`. `grafias` conserva como escribio operaciones
+    cada grupo y parametro, para no mostrar la clave normalizada: la clave sirve
+    para cruzar, no para leer.
+    """
+    valores, grafias = {}, {}
+    for grupo, parametro, valor in (condiciones or []):
+        clave = _mag_clave_cond(grupo, parametro)
+        valores[clave] = _mag_valor_cond(valor)
+        grafias.setdefault(clave, (_txt(grupo).strip(), _txt(parametro).strip()))
+    return valores, grafias
+
+
+def _mag_texto_condicion(nombre_grupo, parametros):
+    """Una linea por grupo: `Grupo — Param: A a B · Param2: X (mantiene)`.
+
+    Un parametro que no cambia igual se escribe. El formulario se lee en terreno
+    para DEJAR la linea en una condicion, no solo para saber que tocar: quien
+    regula la tijera necesita el valor aunque nadie lo mueva. Y una fila ausente
+    en un papel no se ve (§6.24).
+    """
+    partes = []
+    for nombre, va, vb in parametros:
+        if va == vb:
+            partes.append(f"{nombre}: {vb} (mantiene)")
+        else:
+            partes.append(f"{nombre}: {va} a {vb}")
+    return f"{nombre_grupo} — " + " · ".join(partes)
+
+
+def comparar_condiciones(cond_a, cond_b):
+    """Condiciones de laminacion del cambio, repartidas por area del formulario.
+
+    `cond_a` / `cond_b` son las listas `[(grupo, parametro, valor), ...]` que
+    arma `construir_diagrama_pase`. Se reusa esa funcion a proposito: la
+    pantalla, el PDF del Diagrama de Pase y este formulario salen del MISMO
+    armado, asi que no pueden mostrar condiciones distintas del mismo producto.
+
+    Devuelve `{area: [(texto, responsable), ...]}`. Un grupo se emite si al menos
+    uno de los dos productos lo trae; si falta en uno, se dice `(sin dato)` en
+    vez de callarlo, porque "el destino no especifica la condicion" es
+    informacion y una fila que no esta no lo es.
+    """
+    val_a, graf_a = _mag_indice_cond(cond_a)
+    val_b, graf_b = _mag_indice_cond(cond_b)
+    if not val_a and not val_b:
+        return {}
+
+    # Orden de los parametros DENTRO del grupo: el del producto entrante primero
+    # —es la condicion en la que hay que dejar la linea— y despues los que solo
+    # trae el saliente. En `Posicion estrella de lazo` ese orden es A6/A5, A5/A4,
+    # A4/A3, o sea el recorrido de la linea; ordenarlo alfabeticamente lo daria
+    # vuelta, que es la misma trampa que el orden de los stands.
+    claves = list(val_b) + [k for k in val_a if k not in val_b]
+
+    # Grafias de los DOS productos, y gana la del entrante. Buscar solo en uno
+    # dejaba el rotulo de un parametro que el destino no trae —`Corte Cabeza` de
+    # `CUADRADO 9`— cayendo a la clave normalizada, o sea el formulario mostraba
+    # `corte cabeza` en minuscula. La clave sirve para cruzar, nunca para leer.
+    grafias = {**graf_a, **graf_b}
+
+    por_area = {}
+    for grupo_norm, area in MAG_COND_AREA.items():
+        del_grupo = [k for k in claves if k[0] == grupo_norm]
+        if not del_grupo:
+            continue
+        nombre_grupo = next((grafias[k][0] for k in del_grupo
+                             if grafias.get(k, ("", ""))[0]), grupo_norm)
+        parametros = [
+            (grafias.get(k, ("", ""))[1] or k[1],
+             val_a.get(k, "(sin dato)"), val_b.get(k, "(sin dato)"))
+            for k in del_grupo
+        ]
+        por_area.setdefault(area, []).append(
+            (_mag_texto_condicion(nombre_grupo, parametros),
+             MAG_COND_RESPONSABLE.get(area, RESPONSABLE_TREN))
+        )
+    return por_area
+
 # Formato, medido sobre la hoja `KF` del ejemplo. Los colores son theme 8 con
 # tint -0.5 / 0.4 / 0.8, escritos como hex concreto: el tema no viaja dentro de
 # un libro generado desde cero, asi que referenciarlo daria otro color.
@@ -1979,14 +2141,21 @@ def _mag_filas_tren(posiciones, detalle_por_pos):
             for pos in posiciones]
 
 
-def magnitud_bloques(detalle):
+def magnitud_bloques(detalle, cond_a=None, cond_b=None):
     """Los bloques del formulario, en el orden del ejemplo.
 
     Devuelve [(area, [(std, actividad, responsable), ...]), ...]. Se expone
     aparte del escritor de Excel para poder verificar el CONTENIDO sin abrir un
     libro: lo que importa comprobar es el texto, no el archivo.
+
+    `cond_a` / `cond_b` son OPCIONALES a proposito. Un Consolidado sin hoja de
+    condiciones —el vigente hasta hace poco no la tenia— sigue emitiendo el
+    formulario igual, y los llamadores viejos no cambian: agregarle argumentos
+    obligatorios a una funcion que leen varios sitios es el modo de falla de
+    §6.14.
     """
     por_pos = {d.get("Posición"): d for d in (detalle or [])}
+    cond_por_area = comparar_condiciones(cond_a, cond_b)
 
     desbaste = [(None, act, resp) for act, resp in MAGNITUD_DESBASTE]
     # El cambio del desbaste va como una fila mas de su area: es informacion del
@@ -2003,15 +2172,26 @@ def magnitud_bloques(detalle):
         if area == "Cizalla T3":
             bloques.append(("Tren Acabador",
                             _mag_filas_tren(MAGNITUD_TREN_ACABADOR, por_pos)))
-        # Un area sin actividades estandar igual se emite, con una fila en
-        # blanco: la estructura queda a la vista para completarla a mano.
-        bloques.append((area, [(None, a, r) for a, r in actividades]
-                        or [(None, None, None)]))
-    return bloques
+        bloques.append((area, [(None, a, r) for a, r in actividades]))
+
+    # Las condiciones se agregan al FINAL de su area, ya armadas todas las areas:
+    # asi ninguna se puede quedar sin recibirlas por estar construida en otra
+    # rama de arriba. Van despues de las actividades porque responden a otra
+    # pregunta —con que condicion queda la linea, no que hay que hacer— y sin
+    # `STD` porque no son de un stand.
+    salida = []
+    for area, filas in bloques:
+        filas = list(filas) + [(None, texto, resp)
+                               for texto, resp in cond_por_area.get(area, ())]
+        # Un area sin actividades estandar ni condiciones igual se emite, con una
+        # fila en blanco: la estructura queda a la vista para completarla a mano.
+        salida.append((area, filas or [(None, None, None)]))
+    return salida
 
 
 def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
-                         detalle, minutos=None, fecha=None):
+                         detalle, minutos=None, fecha=None,
+                         cond_a=None, cond_b=None, observaciones=None):
     """Arma el Excel de Magnitud de Cambio y lo devuelve como BytesIO.
 
     `detalle` es el que devuelve `clasificar_cambios_codigo_canal` y llega YA
@@ -2019,6 +2199,12 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     contradecir las metricas que la pantalla muestra del mismo cambio, que es la
     leccion de `cb41c68` (§6.19). `minutos` es el de `obtener_tiempo_cambio`, o
     None si el par no esta registrado.
+
+    `cond_a` / `cond_b` / `observaciones` salen de `construir_diagrama_pase` y
+    son opcionales por la misma razon que en `magnitud_bloques`. `observaciones`
+    son las del producto ENTRANTE (criterio de operaciones, 2026-08-14): el
+    formulario es el plan para dejar la linea laminando el destino, asi que son
+    sus instrucciones las que hay que cumplir.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -2028,7 +2214,8 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
                       top=Side(style=arr), bottom=Side(style=aba))
 
     fecha = fecha or datetime.now()
-    bloques = magnitud_bloques(detalle)
+    bloques = magnitud_bloques(detalle, cond_a, cond_b)
+    observaciones = [o for o in (observaciones or []) if _txt(o).strip()]
 
     wb = Workbook()
     ws = wb.active
@@ -2088,10 +2275,40 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
         if fila - 1 > inicio:
             merges.append(f"B{inicio}:B{fila - 1}")
     fin_tabla = fila - 1
+    # Perimetro de cada bloque, para pintarlo mas abajo. Se acumula en vez de
+    # escribirse a mano al final porque el bloque de observaciones es opcional:
+    # con la tupla escrita a mano habria que acordarse de sacarlo cuando no esta.
+    bordes = [(2, 2), (3, fin_tabla)]
+    ultimo = fin_tabla
+
+    # --- Observaciones del Diagrama de Pase ---
+    # Bloque propio y no filas mas de la tabla de areas: no son actividades
+    # asignadas a alguien, son las instrucciones del DP del producto entrante, y
+    # meterlas ahi las dejaria sin responsable —una fila con actividad y sin
+    # dueno es un pendiente de nadie—. Si el Consolidado no trae la hoja, o el
+    # producto no tiene observaciones, el bloque no se emite: un rotulo sobre
+    # nada hace pensar que falta algo.
+    if observaciones:
+        ws.row_dimensions[ultimo + 1].height = 9.0
+        ini_obs = ultimo + 2
+        for i, texto in enumerate(observaciones):
+            r = ini_obs + i
+            ws.cell(r, 4, _txt(texto).strip()).alignment = izq
+            ws.row_dimensions[r].height = MAG_ALTO_FILA * _mag_lineas(texto)
+            for col in range(2, 6):
+                ws.cell(r, col).font = base
+        fin_obs = ini_obs + len(observaciones) - 1
+        rotulo = ws.cell(ini_obs, 2, "Observaciones DP (producto entrante)")
+        rotulo.alignment = centro
+        rotulo.fill = PatternFill("solid", fgColor=MAG_AZUL_SUAVE)
+        if fin_obs > ini_obs:
+            merges.append(f"B{ini_obs}:B{fin_obs}")
+        bordes.append((ini_obs, fin_obs))
+        ultimo = fin_obs
 
     # --- Tiempo de cambio ---
-    ini_tiempo = fin_tabla + 2
-    ws.row_dimensions[fin_tabla + 1].height = 9.0
+    ini_tiempo = ultimo + 2
+    ws.row_dimensions[ultimo + 1].height = 9.0
     ws.cell(ini_tiempo, 2, "Tiempo de cambio")
     # Si el par no esta en BBDD_Tiempo el rotulo va sin numero: dejarlo vacio es
     # informacion; rellenarlo con el tiempo de la direccion inversa no lo es.
@@ -2117,11 +2334,11 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
         ws.cell(r, 2).alignment = centro
 
     # --- Bordes ---
-    # Cuatro bloques separados entre si; cada uno lleva su perimetro en `medium`
-    # y `thin` por dentro. Se pinta al final, sobre las celdas ya escritas, para
+    # Bloques separados entre si; cada uno lleva su perimetro en `medium` y
+    # `thin` por dentro. Se pinta al final, sobre las celdas ya escritas, para
     # no repetir la regla en cada rama de arriba.
-    for arriba, abajo in ((2, 2), (3, fin_tabla), (ini_tiempo, ini_tiempo + 1),
-                          (ini_nota, ultima)):
+    bordes += [(ini_tiempo, ini_tiempo + 1), (ini_nota, ultima)]
+    for arriba, abajo in bordes:
         for r in range(arriba, abajo + 1):
             for col in range(2, 6):
                 ws.cell(r, col).border = borde(
@@ -2298,9 +2515,18 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         # Pase: una falla al armar el archivo avisa, pero no tumba la
         # comparacion que el operador esta mirando.
         try:
+            # Las condiciones y observaciones del pie del DP salen del MISMO
+            # armado que usan la pestana Diagrama de Pase y su PDF: si este
+            # formulario las consultara por su cuenta, el papel y la pantalla
+            # podrian mostrar condiciones distintas del mismo producto.
+            hojas_dp = cargar_hojas_dp()
+            dp_a = construir_diagrama_pase(df_ddp, producto_a, hojas_dp)
+            dp_b = construir_diagrama_pase(df_ddp, producto_b, hojas_dp)
             magnitud = magnitud_cambio_xlsx(
                 producto_a, producto_b, familia_real_a, familia_real_b,
                 detalle_reg, tiempo_ab,
+                cond_a=dp_a["condiciones"], cond_b=dp_b["condiciones"],
+                observaciones=dp_b["observaciones"],
             )
             st.download_button(
                 "Descargar Magnitud de Cambio",
@@ -2309,9 +2535,12 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                            .replace("/", "-").replace(" ", "_")),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="magnitud_xlsx",
-                help="Formulario con el cambio ya cargado stand por stand y las "
-                     "actividades estandar de cada area. El resto se completa a "
-                     "mano segun la operacion.",
+                help="Formulario con el cambio ya cargado stand por stand, las "
+                     "condiciones del pie del Diagrama de Pase (reductores "
+                     "A5/A6, estrella de lazo, tijera y garza T-3...), las "
+                     "observaciones del producto entrante y las actividades "
+                     "estandar de cada area. El resto se completa a mano segun "
+                     "la operacion.",
             )
         except Exception as e:
             logger.error(f"Error generando la Magnitud de Cambio: {str(e)}")
