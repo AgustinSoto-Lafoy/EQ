@@ -38,6 +38,29 @@ def _muestra_color(color: str, etiqueta: str) -> str:
     )
 
 # =====================================
+# NOMBRES DE ARCHIVO DESCARGABLE
+# =====================================
+# Caracteres que NO pueden viajar en el nombre de una descarga. La comilla doble
+# es la peligrosa y la razón por la que existe esta función: streamlit arma la
+# cabecera como `filename="<nombre>"` sin escapar nada, así que una comilla
+# dentro del nombre CIERRA la cabecera antes de tiempo y el navegador guarda un
+# archivo truncado y sin extensión. Con `HEXAGONO 1" (25,4 mm)` la descarga
+# llegaba como `Magnitud_HEXAGONO_1`, que no abre en Excel.
+# Son 11 de los 155 productos —los HEXÁGONO y REDONDO en pulgadas—, o sea el 14%
+# de los pares del comparador y 11 diagramas de pase que no se podían imprimir.
+# El resto se limpia para que el nombre sea válido también en Windows.
+_CARACTERES_INVALIDOS_ARCHIVO = str.maketrans({
+    c: "-" for c in '"*?:<>|\\/\r\n\t'
+})
+
+
+def nombre_archivo_seguro(texto):
+    """Deja `texto` en condiciones de viajar como nombre de una descarga."""
+    limpio = str(texto).translate(_CARACTERES_INVALIDOS_ARCHIVO)
+    return "_".join(limpio.split())
+
+
+# =====================================
 # CAPACIDAD DE STANDS
 # =====================================
 # Posiciones del tren de laminación. `DU` (desbaste) queda fuera a propósito:
@@ -48,6 +71,12 @@ POSICIONES_LINEA = ("M1", "M2", "M3", "M4", "A1", "A2", "A3", "A4", "A5", "A6")
 TOTAL_STANDS_DEFAULT = 22
 EN_MANTENCION_DEFAULT = 2
 HORAS_PREP_STAND_DEFAULT = 2.0
+
+# Un traslado —el canal ya está en línea y solo se mueve de posición— igual pasa
+# por el taller, porque hay que cambiarle las guías: los 17 traslados del
+# programa de julio exigen los 17 cambiar alguna pieza. Operaciones lo estimó en
+# ~1 h entre salir y entrar con la guía nueva (2026-08-17).
+HORAS_TRASLADO_STAND_DEFAULT = 1.0
 
 # Dotación del taller: en cuántos stands se puede trabajar A LA VEZ. Es una
 # restricción distinta de los stands disponibles (cuántos hay): tener 12 stands
@@ -643,41 +672,133 @@ def contar_regulaciones(detalle):
     return leves, fuertes
 
 
+# Tipos de trabajo que puede exigir una posición. Son centinelas: se comparan en
+# `desglose_taller` y se muestran en tabla, así que productor y consumidores
+# cambian a la vez (la lección de §6.14).
+TRABAJO_REGULACION = "Regulación"   # el stand se queda; se ajusta EN LÍNEA
+TRABAJO_TRASLADO = "Traslado"       # el canal ya está en línea, en otra posición
+TRABAJO_MONTAJE = "Montaje"         # el canal no está en línea: se prepara de cero
+TRABAJO_LIBERA = "Libera"           # la posición queda vacía (destino `F`)
+
+
+def _canales_del_tren(df):
+    """{posición: clave normalizada} del tren, sin pases falsos.
+
+    Los `F` quedan fuera a propósito: no son un canal sino la ausencia de uno,
+    así que no hay stand que trasladar ni que preparar.
+    """
+    fuera = {}
+    if df is None or df.empty or "STD" not in df.columns:
+        return fuera
+    for _, r in df.iterrows():
+        pos = r["STD"]
+        if pos not in POSICIONES_LINEA:
+            continue
+        codigo = r["Código Canal"]
+        if _es_pase_falso(codigo):
+            continue
+        clave = _normalizar_codigo_canal(codigo)
+        if clave:
+            fuera[pos] = clave
+    return fuera
+
+
+def _asignar_origen_del_stand(df_a, df_b, detalle):
+    """Escribe en cada entrada del detalle de dónde sale el stand de esa posición.
+
+    Criterio de operaciones del 2026-08-17: **un stand se puede montar en
+    cualquier posición** —no hay diferencia entre tren medio y acabador—, así que
+    un canal que ya viene montado en la línea se TRASLADA en vez de prepararse de
+    cero. Pero el traslado **igual pasa por el taller**, porque hay que cambiarle
+    las guías: medido sobre el programa de julio, los **17 traslados exigen los 17
+    cambiar alguna pieza de guía**, ninguno sirve tal cual. Por eso el traslado no
+    es una regulación, y por eso cuesta menos que un montaje (~1 h contra 2 h).
+
+    La demanda se resuelve por CANTIDAD, no por existencia. En
+    `ANGULO 30 x 3 → PLANA 50 x 3` el origen lleva **un** `PL` y el destino
+    **cinco**: preguntar "¿existe `PL` en el origen?" respondería que sí y no
+    pediría ninguno, cuando faltan cuatro.
+
+    Modifica `detalle` en el sitio (agrega `Trabajo` y `Desde`).
+    """
+    canales_a = _canales_del_tren(df_a)
+    canales_b = _canales_del_tren(df_b)
+
+    # Un stand solo queda libre para trasladarse si NO se queda en su posición.
+    disponibles = {}
+    for pos in POSICIONES_LINEA:
+        clave = canales_a.get(pos)
+        if clave and canales_b.get(pos) != clave:
+            disponibles.setdefault(clave, []).append(pos)
+
+    # Se recorre en el orden de la línea para que la asignación sea determinista:
+    # el mismo cambio tiene que dar siempre el mismo traslado, o la orden de
+    # trabajo diría una cosa distinta cada vez que se descarga.
+    trabajo, desde = {}, {}
+    for pos in POSICIONES_LINEA:
+        clave_b = canales_b.get(pos)
+        if clave_b is None:
+            # La posición queda vacía en el destino: no hay nada que preparar.
+            if canales_a.get(pos):
+                trabajo[pos] = TRABAJO_LIBERA
+            continue
+        if canales_a.get(pos) == clave_b:
+            trabajo[pos] = TRABAJO_REGULACION
+            continue
+        origenes = disponibles.get(clave_b)
+        if origenes:
+            trabajo[pos] = TRABAJO_TRASLADO
+            desde[pos] = origenes.pop(0)
+        else:
+            trabajo[pos] = TRABAJO_MONTAJE
+
+    for d in detalle:
+        d["Trabajo"] = trabajo.get(d["Posición"], "")
+        d["Desde"] = desde.get(d["Posición"], "")
+
+
 @st.cache_data
 def clasificar_cambios_codigo_canal(df_a, df_b):
     """
     Clasifica, posición por posición (STD), los cambios entre un producto
-    origen (df_a) y un producto destino (df_b), distinguiendo dos motivos
-    de "Regulación":
+    origen (df_a) y un producto destino (df_b).
 
-      A) El Código Canal cambia de posición pero sigue existiendo en el
-         producto destino (existencia global, no solo por posición):
-         "Regulación" — se reordena y calibra el mismo stand; NO corresponde
-         cambio de stand.
-      B) El Código Canal se mantiene igual en esa misma posición, pero algún
-         otro parámetro técnico (Material, Luz, guías, embudos, ángulos,
-         estabilización, etc.) cambia entre origen y destino: "Regulación" —
-         el stand no se reemplaza ni se reubica, pero sí requiere ajuste/
-         calibración por el cambio de condición.
+    La regla, por criterio de operaciones del 2026-08-17, mira SOLO esa posición:
 
-    Solo cuando el Código Canal deja de existir por completo en el producto
-    destino corresponde "Cambio completo" (reemplazar código de canal, guías,
-    stand y elementos asociados).
+      - Mismo Código Canal en la misma posición, pero cambia algún parámetro
+        técnico (Material, Luz, guías, embudos, ángulos, estabilización…):
+        **"Regulación"** — el stand se queda donde está y se ajusta EN LÍNEA.
+      - Código Canal distinto: **"Cambio completo"** — en esa posición hay que
+        poner otro stand, venga de donde venga.
 
-    Ambos tipos de Regulación se gradúan además en un `Nivel` (ver `PIEZAS_GUIA`):
+    De dónde sale ese stand es una pregunta APARTE, y se responde en el campo
+    `Trabajo` del detalle (ver `_asignar_origen_del_stand`): puede ser un
+    traslado desde otra posición o un montaje nuevo. Las dos cosas pasan por el
+    taller; la diferencia es cuánto demoran.
+
+    > **Hasta el 2026-08-17 existía una tercera categoría, "el código se
+    > reubica", que marcaba Regulación cuando el código de ORIGEN seguía
+    > existiendo en cualquier posición del producto destino. Contestaba la
+    > pregunta equivocada:** hablaba del stand que SALE, no de lo que hay que
+    > poner en esa posición. En `HEXAGONO 1" (25,4 mm) → PLANA 25 x 3` el M1
+    > decía "Regulación" porque el `PL` que sale reaparece en A5/A6, cuando en
+    > M1 hay que montar un `OP 6816 M`. Eran 41.105 posiciones (el 49% las
+    > disparaba `PL` él solo) y hacía que la Magnitud de Cambio —que es una
+    > orden de trabajo— pidiera regular un stand que había que montar.
+
+    Las Regulaciones se gradúan además en un `Nivel` (ver `PIEZAS_GUIA`):
     "Leve" si solo hay que ajustar el stand en línea, "Fuerte" si además hay que
-    cambiar una pieza de guía. El nivel se calcula igual en los dos casos —
-    también en la reubicación, por criterio de operaciones del 2026-08-06: mover
-    el código de posición no encarece por sí solo, lo que encarece es la pieza.
+    cambiar una pieza de guía.
 
     Retorna (cambios_completos, regulaciones, detalle) donde detalle es una
-    lista de dicts con Posición, Código Origen, Código Destino, Categoría, Nivel
-    y Motivo, solo para las posiciones donde efectivamente hay una diferencia
-    (de código o de algún otro parámetro técnico).
+    lista de dicts con Posición, Código Origen, Código Destino, Categoría, Nivel,
+    Motivo, Piezas, Parámetros, Trabajo y Desde, solo para las posiciones donde
+    efectivamente hay una diferencia (de código o de algún otro parámetro).
 
     La firma devuelve 3 valores a propósito: las suites de regresión hacen
-    `_, _, det = ...`, y el desglose leve/fuerte se obtiene del detalle con
-    `contar_regulaciones` en vez de agrandar la tupla.
+    `_, _, det = ...`, y tanto el desglose leve/fuerte (`contar_regulaciones`)
+    como el de traslado/montaje (`desglose_taller`) salen del detalle en vez de
+    agrandar la tupla.
     """
     detalle = []
     if (df_a.empty or df_b.empty
@@ -693,9 +814,6 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
     # de otra forma, repartidos en 788 de los 11.935 pares de productos. Cada uno
     # consume un stand del taller y ~2 h de preparación en el análisis de
     # capacidad, así que no era un detalle de presentación.
-    codigos_destino_existentes = {
-        _normalizar_codigo_canal(c) for c in df_b["Código Canal"].dropna()
-    }
 
     # Columnas de parámetros técnicos a revisar cuando el código NO cambia
     # (todo lo que no sea identificador de posición/producto ni el propio código)
@@ -742,32 +860,24 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             })
             continue
 
-        # El código de canal difiere en esta posición: ¿el stand de origen sigue
-        # existiendo en algún lugar del producto destino?
-        if clave_a is not None and clave_a in codigos_destino_existentes:
-            categoria = "Regulación"
-            nivel, motivo_nivel, piezas = _nivel_regulacion(parametros_cambiados)
-            motivo = "Código se reubica en otra posición"
-            if parametros_cambiados:
-                motivo += "; " + motivo_nivel
-        else:
-            categoria = "Cambio completo"
-            # El cambio completo ya es la intervención más pesada: graduarlo
-            # sería comparar contra sí mismo.
-            nivel = NIVEL_NO_APLICA
-            motivo = "Código deja de existir en el producto destino"
-            piezas = [c for c in parametros_cambiados if c in PIEZAS_GUIA]
-
+        # El código de canal difiere en esta posición: hay que poner otro stand
+        # acá, y eso es un Cambio completo sin importar de dónde salga. No se
+        # mira si el código de origen reaparece en otra posición del destino:
+        # eso habla del stand que se va, no de esta posición (ver el docstring).
         detalle.append({
             "Posición": pos,
             "Código Origen": codigo_a if pd.notna(codigo_a) else "-",
             "Código Destino": codigo_b if pd.notna(codigo_b) else "-",
-            "Categoría": categoria,
-            "Nivel": nivel,
-            "Motivo": motivo,
-            "Piezas": piezas,
+            "Categoría": "Cambio completo",
+            # El cambio completo ya es la intervención más pesada: graduarlo
+            # sería comparar contra sí mismo.
+            "Nivel": NIVEL_NO_APLICA,
+            "Motivo": "Cambia el canal de esta posición",
+            "Piezas": [c for c in parametros_cambiados if c in PIEZAS_GUIA],
             "Parámetros": parametros_cambiados,
         })
+
+    _asignar_origen_del_stand(df_a, df_b, detalle)
 
     # Los conteos cubren solo las posiciones del tren (POSICIONES_LINEA). `DU`
     # sigue apareciendo en el detalle porque el operador necesita verlo, pero no
@@ -795,11 +905,14 @@ def stands_montados(df_ddp, producto):
 
 
 def stands_a_montar(detalle):
-    """A partir del detalle de un cambio, separa montajes de liberaciones.
+    """A partir del detalle de un cambio, separa lo que pasa por taller de lo que libera.
 
     Un "Cambio completo" cuyo código destino es `F` NO es un montaje: esa
     posición queda vacía en el producto destino, así que el stand se libera en
     vez de consumirse. Contarlo como montaje infla la necesidad de taller.
+
+    El primer valor incluye **traslados y montajes**: los dos pasan por el taller
+    (el traslado, a cambiarle las guías). Para separarlos, `desglose_taller`.
     """
     montar = liberar = 0
     for d in detalle or []:
@@ -810,6 +923,24 @@ def stands_a_montar(detalle):
         else:
             montar += 1
     return montar, liberar
+
+
+def desglose_taller(detalle):
+    """(montajes, traslados) del tren, según el campo `Trabajo` del detalle.
+
+    Se lee del detalle en vez de recalcularse para que la pantalla, el análisis
+    de capacidad y la Magnitud de Cambio no puedan contradecirse sobre el mismo
+    cambio — la lección de `cb41c68`.
+    """
+    montajes = traslados = 0
+    for d in detalle or []:
+        if d["Posición"] not in POSICIONES_LINEA:
+            continue
+        if d.get("Trabajo") == TRABAJO_MONTAJE:
+            montajes += 1
+        elif d.get("Trabajo") == TRABAJO_TRASLADO:
+            traslados += 1
+    return montajes, traslados
 
 
 def horas_preparacion(n_montar, puestos, horas_por_stand):
@@ -824,13 +955,38 @@ def horas_preparacion(n_montar, puestos, horas_por_stand):
     return math.ceil(n_montar / puestos) * float(horas_por_stand)
 
 
-def evaluar_capacidad_cambio(disponibles, montar, horas_bloque, puestos, horas_por_stand):
+def horas_taller(montajes, traslados, puestos, horas_por_stand,
+                 horas_por_traslado=None):
+    """Horas de taller de un cambio, contando traslados y montajes por separado.
+
+    Un traslado ya trae el canal labrado: solo hay que cambiarle las guías, y
+    según operaciones (2026-08-17) demora **~1 h** entre salir y entrar con la
+    guía nueva, contra las 2 h de un montaje.
+
+    Se suman dos tandas en vez de repartir horas-hombre a propósito: conserva el
+    modelo de `horas_preparacion` —el mismo que el usuario tiene en la cabeza al
+    fijar "preparaciones simultáneas"— y devuelve exactamente lo mismo que antes
+    cuando no hay traslados, así que el número no se mueve por la refactorización.
+    """
+    if horas_por_traslado is None:
+        horas_por_traslado = HORAS_TRASLADO_STAND_DEFAULT
+    return (horas_preparacion(montajes, puestos, horas_por_stand)
+            + horas_preparacion(traslados, puestos, horas_por_traslado))
+
+
+def evaluar_capacidad_cambio(disponibles, montar, horas_bloque, puestos, horas_por_stand,
+                             traslados=0, horas_por_traslado=None):
     """Decide si el cambio se puede dejar preparado. Devuelve (estado, motivo).
 
     Estados: "No evaluable" · "OK" · "Ajustado" · "Sin stands" · "Sin tiempo".
     `horas_bloque` es el tiempo de laminación del producto de origen, es decir
     la ventana real para preparar. Si el programa no trae horas, la restricción
     de tiempo no se evalúa y se dice explícitamente.
+
+    `montar` son todos los stands que pasan por taller; `traslados` dice cuántos
+    de ésos ya traen el canal y solo necesitan guías nuevas (~1 h en vez de 2).
+    Es un parámetro opcional **al final** a propósito: sin él la función devuelve
+    exactamente lo de antes, así que agregarlo no movió ningún número existente.
     """
     if disponibles is None or montar is None:
         return "No evaluable", "Falta homologación o datos de diagrama de pase"
@@ -842,12 +998,21 @@ def evaluar_capacidad_cambio(disponibles, montar, horas_bloque, puestos, horas_p
         faltan = montar - disponibles
         return "Sin stands", f"Faltan {faltan} stand(s): se necesitan {montar} y hay {disponibles}"
 
-    h_prep = horas_preparacion(montar, puestos, horas_por_stand)
+    if horas_por_traslado is None:
+        horas_por_traslado = HORAS_TRASLADO_STAND_DEFAULT
+    traslados = max(0, min(int(traslados or 0), montar))
+    montajes = montar - traslados
+    h_prep = horas_taller(montajes, traslados, puestos, horas_por_stand, horas_por_traslado)
     puestos = max(1, int(puestos or 1))
-    tandas = math.ceil(montar / puestos)
     # Cómo se llega a las horas: hacerlo explícito evita que el número parezca salido de la nada.
-    calculo = (f"{montar} stand(s) ÷ {puestos} simultáneo(s) = {tandas} tanda(s) × "
-               f"{horas_por_stand:g} h = {h_prep:.1f} h")
+    partes = []
+    if montajes:
+        partes.append(f"{montajes} montaje(s) ÷ {puestos} = "
+                      f"{math.ceil(montajes / puestos)} tanda(s) × {horas_por_stand:g} h")
+    if traslados:
+        partes.append(f"{traslados} traslado(s) ÷ {puestos} = "
+                      f"{math.ceil(traslados / puestos)} tanda(s) × {horas_por_traslado:g} h")
+    calculo = " + ".join(partes) + f" = {h_prep:.1f} h"
 
     if horas_bloque is None or pd.isna(horas_bloque):
         return "OK", (f"{calculo}. Hay {disponibles} stand(s) disponibles. "
@@ -1582,7 +1747,7 @@ def mostrar_diagrama_pase(df_ddp):
         st.download_button(
             "Descargar diagrama en PDF",
             data=pdf_bytes,
-            file_name=f"DP_{producto.replace('/', '-').replace(' ', '_')}.pdf",
+            file_name=f"DP_{nombre_archivo_seguro(producto)}.pdf",
             mime="application/pdf",
             key="dp_pdf",
         )
@@ -1591,15 +1756,26 @@ def mostrar_diagrama_pase(df_ddp):
         st.warning(f"No se pudo generar el PDF: {e}")
 
 
-def mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones):
+def mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones,
+                            traslados=None):
     """Las 4 métricas de intervención por stand.
 
     Función única para que los dos modos muestren exactamente los mismos
     números: si cada vista armara sus métricas, podrían divergir.
+
+    `traslados` va **al final y es opcional**: es un dato de detalle sobre los
+    cambios completos (cuántos de ellos reusan un stand que ya está en línea),
+    no una quinta métrica, así que se muestra como ayuda de la primera en vez de
+    agregar una columna que descuadraría con "Stands intervenidos".
     """
     col_r1, col_r2, col_r3, col_r4 = st.columns(4)
     with col_r1:
-        st.metric("Cambios completos de stand", cambios_completos)
+        ayuda = None
+        if traslados:
+            ayuda = (f"{traslados} de esos {cambios_completos} son un traslado: el "
+                     f"canal ya está montado en otra posición y el stand se mueve. "
+                     f"Igual pasa por el taller, a cambiarle las guías.")
+        st.metric("Cambios completos de stand", cambios_completos, help=ayuda)
     with col_r2:
         st.metric("Regulaciones fuertes", reg_fuertes,
                   help="Además del ajuste hay que cambiar una pieza de guía: "
@@ -1643,6 +1819,21 @@ def _tabla_laminacion(detalle, categoria, nivel=None):
     return sorted(filas, key=lambda d: _orden_stand(d.get("Posición")))
 
 
+def _texto_origen_stand(d):
+    """De dónde sale el stand de esta posición, para la vista de Laminación.
+
+    Es el mismo campo `Trabajo` que usa la Magnitud de Cambio: la pantalla y el
+    formulario no pueden decir cosas distintas del mismo stand.
+    """
+    if _es_pase_falso(d.get("Código Destino")):
+        return "Pase falso: la posición queda vacía, el stand se libera"
+    if d.get("Trabajo") == TRABAJO_TRASLADO:
+        desde = d.get("Desde")
+        return (f"Traslado desde {desde} (cambiarle las guías)" if desde
+                else "Traslado desde otra posición (cambiarle las guías)")
+    return "Montar stand preparado en taller"
+
+
 def mostrar_resumen_laminacion(detalle):
     """Vista por stand del cambio, para quien lo opera en línea.
 
@@ -1663,8 +1854,10 @@ def mostrar_resumen_laminacion(detalle):
     # --- 1. Cambio completo ---
     st.markdown(f"#### Cambio completo — {len(completos)} stand(s)")
     st.caption(
-        "El código de canal deja de existir en el producto destino: hay que "
-        "bajar el stand y montar otro ya preparado."
+        "El canal de esa posición cambia: hay que bajar el stand y poner otro. "
+        "La columna *De dónde sale* dice si el stand se prepara de cero o se "
+        "traslada desde otra posición; el traslado igual pasa por el taller, a "
+        "cambiarle las guías."
     )
     if completos:
         st.dataframe(
@@ -1675,8 +1868,7 @@ def mostrar_resumen_laminacion(detalle):
                 # Un destino `F` no es un montaje: la posición queda vacía, así
                 # que ese stand se LIBERA. Decirlo acá evita que se prepare un
                 # stand que nadie va a montar (§6.10).
-                "Observación": ("Pase falso: la posición queda vacía, el stand se libera"
-                                if _es_pase_falso(d["Código Destino"]) else "Montar stand preparado"),
+                "De dónde sale": _texto_origen_stand(d),
             } for d in completos]),
             width="stretch", hide_index=True
         )
@@ -2126,12 +2318,18 @@ def _mag_texto_stand(posicion, detalle_por_pos):
     texto = f"{origen} a {destino}"
     if _es_pase_falso(destino):
         texto += " · la posición queda vacía, el stand se libera"
-    elif d.get("Categoría") == "Regulación" and not _es_pase_falso(origen):
-        # `Regulacion` con codigo distinto = el codigo sigue existiendo en el
-        # producto destino, en otra posicion. Decirlo evita pedirle un stand
-        # nuevo al taller. Se omite cuando el origen es pase falso: `F` no es un
-        # canal, asi que "se reubica" no significaria nada (§10.12).
-        texto += f" · el canal {origen} se reubica en otra posición"
+    elif d.get("Trabajo") == TRABAJO_TRASLADO:
+        # El canal ya viene montado en la linea, en otra posicion: se traslada en
+        # vez de prepararse de cero. Igual pasa por taller —hay que cambiarle las
+        # guias— asi que se dice de donde sale, no que se "regula".
+        desde = d.get("Desde")
+        texto += (f" · trasladar el stand desde {desde}, con guías nuevas"
+                  if desde else " · trasladar el stand, con guías nuevas")
+    # El montaje nuevo NO se anota: es el caso por defecto de un cambio de
+    # codigo y la hoja escrita a mano tampoco lo dice (ahi el par ANGULO 50 x 3
+    # -> ANGULO 30 x 3 pone `RP 55 a RP 50`, a secas). Anotarlo en cada fila
+    # agrega una linea de ruido al formulario sin decir nada que no se sepa, y
+    # el formulario ya esta largo (C24). Solo se anota la excepcion.
     return texto
 
 
@@ -2531,8 +2729,8 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             st.download_button(
                 "Descargar Magnitud de Cambio",
                 data=magnitud,
-                file_name=(f"Magnitud_{producto_a}_a_{producto_b}.xlsx"
-                           .replace("/", "-").replace(" ", "_")),
+                file_name=(f"Magnitud_{nombre_archivo_seguro(producto_a)}"
+                           f"_a_{nombre_archivo_seguro(producto_b)}.xlsx"),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="magnitud_xlsx",
                 help="Formulario con el cambio ya cargado stand por stand, las "
@@ -2547,7 +2745,9 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             st.warning(f"No se pudo generar la Magnitud de Cambio: {e}")
 
         if modo_analisis == MODO_LAMINACION:
-            mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones)
+            _, traslados_det = desglose_taller(detalle_reg)
+            mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones,
+                                    traslados=traslados_det)
             st.markdown("---")
             mostrar_resumen_laminacion(detalle_reg)
             return
@@ -2636,7 +2836,8 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
         # Técnico y ese resultado se reusa acá: `clasificar_cambios_codigo_canal`
         # ya restringe sus conteos a POSICIONES_LINEA (§6.10), así que DU queda
         # fuera por construcción.
-        mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones)
+        mostrar_metricas_stands(cambios_completos, reg_fuertes, reg_leves, regulaciones,
+                                traslados=desglose_taller(detalle_reg)[1])
 
         # La tabla por componente sale SOLO del diagrama de pase y SOLO de las
         # posiciones del tren. `df_desbaste_cmp` ya no se concatena.
@@ -2735,12 +2936,13 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                 tiempo = obtener_tiempo_cambio(df_tiempo, origen, destino)
                 
                 # Clasificar cambios de código canal: Cambio completo vs Regulación
-                # (un stand solo se cuenta como "cambio completo" si deja de existir
-                # en el producto destino; si se reubica en otra posición, es Regulación)
+                # (una posición es "cambio completo" cuando su canal cambia; de
+                # dónde sale el stand —traslado o montaje— lo dice `Trabajo`)
                 cambios_completos = 0
                 regulaciones = 0
                 reg_leves = reg_fuertes = 0
                 montar = liberar = None
+                traslados_cap = 0
                 try:
                     df_a = df_ddp[df_ddp["Producto"] == origen]
                     df_b = df_ddp[df_ddp["Producto"] == destino]
@@ -2749,6 +2951,7 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                         cambios_completos, regulaciones, detalle_cap = clasificar_cambios_codigo_canal(df_a, df_b)
                         montar, liberar = stands_a_montar(detalle_cap)
                         reg_leves, reg_fuertes = contar_regulaciones(detalle_cap)
+                        _, traslados_cap = desglose_taller(detalle_cap)
                 except Exception as e:
                     logger.error(f"Error calculando cambios código canal: {str(e)}")
 
@@ -2758,7 +2961,8 @@ def mostrar_secuencia_programa(df_ddp, df_tiempo):
                     disponibles = None if ocupados is None else int(total_stands) - int(en_mantencion) - ocupados
                     h_bloque = horas_bloques.get(grupos_prog.iloc[i]) if horas_bloques else None
                     estado, motivo = evaluar_capacidad_cambio(
-                        disponibles, montar, h_bloque, puestos_taller, horas_prep
+                        disponibles, montar, h_bloque, puestos_taller, horas_prep,
+                        traslados=traslados_cap
                     )
                 except Exception as e:
                     logger.error(f"Error evaluando capacidad de stands: {str(e)}")
