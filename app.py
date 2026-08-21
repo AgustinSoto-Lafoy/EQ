@@ -2305,26 +2305,30 @@ def _mag_texto_stand(posicion, detalle_por_pos):
     otros = [p for p in (d.get("Parámetros") or []) if p not in piezas]
 
     if _normalizar_codigo_canal(origen) == _normalizar_codigo_canal(destino):
-        # Mismo codigo: el stand no se mueve, se ajusta donde esta.
+        # Mismo codigo: el stand no se mueve, se ajusta donde esta. Se dice QUE
+        # tipo de trabajo hay que hacer, no que piezas ni que parametros: este
+        # documento es el resumen de lo que debe hacerse (C24), y el detalle vive
+        # en el Comparador. Cuando aplican los dos se nombran los dos, porque si
+        # no, un cambio de guia que ademas exige regular el material se leeria
+        # como si el material no se tocara.
         texto = f"Mantiene {origen}"
-        if piezas:
-            texto += "; cambia guía: " + ", ".join(piezas)
-            if otros:
-                texto += " · además " + ", ".join(otros)
+        if piezas and otros:
+            texto += " · cambio de guía y regulación de material"
+        elif piezas:
+            texto += " · cambio de guía"
         elif otros:
-            texto += "; regula " + ", ".join(otros)
+            texto += " · regulación de material"
         return texto
 
     texto = f"{origen} a {destino}"
     if _es_pase_falso(destino):
-        texto += " · la posición queda vacía, el stand se libera"
+        texto += " · queda vacía"
     elif d.get("Trabajo") == TRABAJO_TRASLADO:
         # El canal ya viene montado en la linea, en otra posicion: se traslada en
         # vez de prepararse de cero. Igual pasa por taller —hay que cambiarle las
         # guias— asi que se dice de donde sale, no que se "regula".
         desde = d.get("Desde")
-        texto += (f" · trasladar el stand desde {desde}, con guías nuevas"
-                  if desde else " · trasladar el stand, con guías nuevas")
+        texto += f" · trasladar desde {desde}" if desde else " · trasladar"
     # El montaje nuevo NO se anota: es el caso por defecto de un cambio de
     # codigo y la hoja escrita a mano tampoco lo dice (ahi el par ANGULO 50 x 3
     # -> ANGULO 30 x 3 pone `RP 55 a RP 50`, a secas). Anotarlo en cada fila
@@ -2406,6 +2410,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.worksheet.page import PageMargins
 
     def borde(izq="thin", der="thin", arr="thin", aba="thin"):
         return Border(left=Side(style=izq), right=Side(style=der),
@@ -2561,7 +2566,17 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
         ws.merge_cells(rango)
 
     # --- Impresion ---
-    ws.page_setup.orientation = "landscape"
+    # VERTICAL, no horizontal: la hoja se lleva EN LA MANO durante el cambio
+    # (C24), y girarla sube la letra impresa de 5,8 a 8,5 pt sin tocar una sola
+    # fila del contenido. El papel se fija a CARTA y los margenes a 0.25" en los
+    # cuatro lados: el archivo se envia por correo a todos, y sin fijarlos cada
+    # destinatario imprime con el papel de SU impresora, a otra escala. Ojo con
+    # el preset "Estrecho" de Excel, que NO es esto: deja 0.75" arriba y abajo,
+    # y con eso la letra cae de 8,7 a 7,9 pt.
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
+    ws.page_margins = PageMargins(left=0.25, right=0.25, top=0.25, bottom=0.25,
+                                  header=0.0, footer=0.0)
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
