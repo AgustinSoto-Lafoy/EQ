@@ -3562,16 +3562,24 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
         # La letra de familia sale del propio DDP (columna `Familia`), no se infiere
         # del nombre del producto. Va acá y no dentro de una rama porque `df_resumen`
         # se arma en tres caminos distintos y las tres deben traerla.
+        # El cruce se hace con un dict de str, no con `.map()` sobre la columna del
+        # DDP: `cargar_datos` convierte `Familia` a 'category' (15 valores sobre miles
+        # de filas), `.map()` propaga ese dtype y un producto sin match reventaba con
+        # "Cannot setitem on a Categorical with a new category" — el relleno "" no es
+        # una categoría existente. Verificar SIEMPRE con `cargar_datos()`, no con
+        # `pd.read_excel`: leído directo el dtype es texto y el bug no aparece.
         if "Familia" in df_ddp.columns and "Familia" not in df_resumen.columns:
-            familia_por_producto = (
+            familia_por_producto = dict(
                 df_ddp.dropna(subset=["Familia"])
                 .drop_duplicates(subset=["Producto"], keep="first")
-                .set_index("Producto")["Familia"]
+                .astype({"Producto": "str", "Familia": "str"})[["Producto", "Familia"]]
+                .itertuples(index=False, name=None)
             )
             df_resumen = df_resumen.copy()
             df_resumen.insert(
                 1, "Familia",
-                df_resumen["Nombre STD"].map(familia_por_producto).fillna("").astype(str)
+                [familia_por_producto.get(p, "")
+                 for p in df_resumen["Nombre STD"].astype(str)]
             )
 
         # Mostrar métricas generales
