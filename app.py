@@ -117,6 +117,29 @@ PIEZAS_GUIA = frozenset({
     "Ángulo Diagonal Entrada", "Ángulo Diagonal Salida",
 })
 
+# --- Embudos ---
+# El embudo es la unica pieza de guia que la Magnitud nombra CON SU VALOR
+# (criterio de operaciones, 2026-09-08): es lo primero que hay que tener a mano
+# al llegar al stand, y saber que hay que cambiarlo sin saber cual no sirve. El
+# resto de `PIEZAS_GUIA` sigue resumido en "cambio de guia" por C24 —enumerarlas
+# estiraba la celda a 6 lineas y bajaba la letra impresa a 4,6 pt—. Medido antes
+# de aplicarlo sobre los 31 cambios del programa de julio: 5 lineas extra en
+# total, la letra baja 0,20 pt en el peor formulario y 0,00 en la mediana.
+#
+# El diccionario da la etiqueta con que se escribe cada columna. La de entrada va
+# sin apellido porque es el caso normal (1.079 filas del DDP contra 159); la de
+# salida se nombra, o las dos se leerian como la misma pieza.
+MAG_EMBUDOS = {
+    "Embudo Entrada": "embudo",
+    "Embudo Salida": "embudo salida",
+}
+
+# `/` es el mismo "no lleva embudo" que la celda en blanco: asi lo escribe el DP,
+# igual que en el codigo de canal (§6.21). Son 38 celdas en Entrada y 3 en
+# Salida. Sin unificarlos, pasar de blanco a `/` se escribe como un cambio de
+# embudo que no existe —medido: 1.436 de 119.350 posiciones—.
+MAG_EMBUDO_VACIO = frozenset({"", "/", "-", "--", "---", "----"})
+
 # Etiquetas de nivel. Son centinelas: se comparan en `contar_regulaciones` y se
 # muestran en tabla. Cambiar el texto obliga a cambiar ambos lados a la vez.
 NIVEL_FUERTE = "Fuerte"
@@ -619,6 +642,30 @@ def _parametros_cambiados(row_a, row_b, columnas):
     return cambiados
 
 
+def _valor_embudo(valor):
+    """El embudo de una celda, con todas las grafias del vacio unificadas a ''."""
+    texto = "" if valor is None or (isinstance(valor, float) and pd.isna(valor)) else str(valor).strip()
+    return "" if texto in MAG_EMBUDO_VACIO else texto
+
+
+def _embudos_cambiados(row_a, row_b):
+    """Los embudos que cambian entre dos filas: [(columna, origen, destino), ...].
+
+    Se calcula ACA, junto al resto de la comparacion de la posicion, y viaja en
+    el detalle: si la Magnitud lo leyera por su cuenta del DDP tendriamos dos
+    lecturas del mismo dato, que es como la app termina contradiciendose a si
+    misma (§6.24). El vacio se normaliza con `_valor_embudo`, asi que blanco y
+    `/` no cuentan como cambio.
+    """
+    cambios = []
+    for col in MAG_EMBUDOS:
+        origen = _valor_embudo(row_a.get(col))
+        destino = _valor_embudo(row_b.get(col))
+        if origen != destino:
+            cambios.append((col, origen, destino))
+    return cambios
+
+
 def _nivel_regulacion(parametros_cambiados):
     """Gradúa una regulación en Leve o Fuerte. Devuelve (nivel, motivo, piezas).
 
@@ -857,6 +904,7 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
                 "Motivo": "Mismo código; " + motivo,
                 "Piezas": piezas,
                 "Parámetros": parametros_cambiados,
+                "Embudos": _embudos_cambiados(row_a, fila_b),
             })
             continue
 
@@ -875,6 +923,9 @@ def clasificar_cambios_codigo_canal(df_a, df_b):
             "Motivo": "Cambia el canal de esta posición",
             "Piezas": [c for c in parametros_cambiados if c in PIEZAS_GUIA],
             "Parámetros": parametros_cambiados,
+            # El embudo se anota tambien cuando el canal cambia: el stand se monta
+            # nuevo igual, pero quien lo prepara necesita saber que embudo lleva.
+            "Embudos": _embudos_cambiados(row_a, fila_b),
         })
 
     _asignar_origen_del_stand(df_a, df_b, detalle)
@@ -2094,6 +2145,21 @@ MAGNITUD_AREAS_POST = (
 MAGNITUD_TREN_MEDIO = ("M1", "M2", "M3", "M4")
 MAGNITUD_TREN_ACABADOR = ("A1", "A2", "A3", "A4", "A5", "A6")
 
+# --- Vista SEMANERO ---
+# El Semanero es el operador de Equipo de Cambio que confirma que el cambio quedo
+# bien, y solo recorre la linea: desbaste, los dos trenes y las dos cizallas.
+# Las areas de apoyo —PP1 con el horno, parrilla, T4, empaquetado, pozo y grua—
+# tienen su propio responsable y el no las verifica. En un documento que se lleva
+# EN LA MANO (C24) cada fila que no le toca es ruido que hay que saltarse.
+#
+# Es un SUBCONJUNTO de las areas que ya se arman, no un segundo armado: las dos
+# vistas salen de `magnitud_bloques` con el mismo detalle, asi que no pueden
+# decir cosas distintas del mismo cambio. Los nombres tienen que existir tal cual
+# en `MAGNITUD_AREAS_PRE` / `MAGNITUD_AREAS_POST` o el area desaparece sin avisar
+# —lo cubre `verificar_magnitud_cambio.py` §9—.
+MAGNITUD_AREAS_SEMANERO = ("Desbaste", "Tren Medio", "Entrada A1", "Cizalla T2",
+                           "Tren Acabador", "Cizalla T3")
+
 # --- Condiciones de laminacion del pie del Diagrama de Pase ---
 # Viven en la hoja `Condiciones` del Consolidado (Producto · Grupo · Parametro ·
 # Valor) y hasta ahora solo se veian en la pestana Diagrama de Pase. Son
@@ -2275,6 +2341,29 @@ def _mag_lineas(texto):
     return max(1, math.ceil(len(str(texto)) / MAG_CHARS_POR_LINEA))
 
 
+def _mag_anexar_embudos(texto, d):
+    """Anexa al texto del stand los embudos que cambian, con sus valores.
+
+    Es la UNICA pieza de guia que se nombra con su valor (ver `MAG_EMBUDOS`).
+    Los valores salen de la lista del detalle, no de parsear el `Motivo`: es la
+    misma razon por la que `Piezas` y `Parámetros` son listas (§6.19).
+    """
+    for col, origen, destino in (d.get("Embudos") or []):
+        etiqueta = MAG_EMBUDOS.get(col, "embudo")
+        if not origen:
+            # El vacio NO se escribe con `MAG_COND_NO_APLICA`: ese guion largo es
+            # el separador con que se emiten las condiciones del pie
+            # (`Tijera T-3 — Condición: ...`), y `embudo — a 20.9.9` se leeria
+            # como una condicion. Ademas no dice nada: "monta" es una
+            # instruccion, "de nada a algo" hay que traducirlo mentalmente.
+            texto += f" · monta {etiqueta} {destino}"
+        elif not destino:
+            texto += f" · retira {etiqueta} {origen}"
+        else:
+            texto += f" · {etiqueta} {origen} a {destino}"
+    return texto
+
+
 def _mag_texto_stand(posicion, detalle_por_pos):
     """Que se escribe en la columna Actividades para un stand.
 
@@ -2318,12 +2407,14 @@ def _mag_texto_stand(posicion, detalle_por_pos):
             texto += " · cambio de guía"
         elif otros:
             texto += " · regulación de material"
-        return texto
+        return _mag_anexar_embudos(texto, d)
 
     texto = f"{origen} a {destino}"
     if _es_pase_falso(destino):
-        texto += " · queda vacía"
-    elif d.get("Trabajo") == TRABAJO_TRASLADO:
+        # La posicion queda sin stand: no hay embudo que preparar, y anotar el
+        # que salio seria pedir trabajo sobre una posicion que se vacia.
+        return texto + " · queda vacía"
+    if d.get("Trabajo") == TRABAJO_TRASLADO:
         # El canal ya viene montado en la linea, en otra posicion: se traslada en
         # vez de prepararse de cero. Igual pasa por taller —hay que cambiarle las
         # guias— asi que se dice de donde sale, no que se "regula".
@@ -2334,7 +2425,7 @@ def _mag_texto_stand(posicion, detalle_por_pos):
     # -> ANGULO 30 x 3 pone `RP 55 a RP 50`, a secas). Anotarlo en cada fila
     # agrega una linea de ruido al formulario sin decir nada que no se sepa, y
     # el formulario ya esta largo (C24). Solo se anota la excepcion.
-    return texto
+    return _mag_anexar_embudos(texto, d)
 
 
 def _mag_filas_tren(posiciones, detalle_por_pos):
@@ -2343,7 +2434,7 @@ def _mag_filas_tren(posiciones, detalle_por_pos):
             for pos in posiciones]
 
 
-def magnitud_bloques(detalle, cond_a=None, cond_b=None):
+def magnitud_bloques(detalle, cond_a=None, cond_b=None, semanero=False):
     """Los bloques del formulario, en el orden del ejemplo.
 
     Devuelve [(area, [(std, actividad, responsable), ...]), ...]. Se expone
@@ -2354,7 +2445,13 @@ def magnitud_bloques(detalle, cond_a=None, cond_b=None):
     condiciones —el vigente hasta hace poco no la tenia— sigue emitiendo el
     formulario igual, y los llamadores viejos no cambian: agregarle argumentos
     obligatorios a una funcion que leen varios sitios es el modo de falla de
-    §6.14.
+    §6.14. `semanero` sigue la misma regla: por defecto sale la vista completa,
+    o sea quien ya llamaba a esta funcion no ve nada distinto.
+
+    Con `semanero=True` se emiten solo las areas de `MAGNITUD_AREAS_SEMANERO`.
+    Se FILTRA al final, sobre los bloques ya armados, en vez de saltarse las
+    areas al construirlas: asi las dos vistas recorren exactamente el mismo
+    codigo y no hay forma de que una reciba una condicion que la otra no.
     """
     por_pos = {d.get("Posición"): d for d in (detalle or [])}
     cond_por_area = comparar_condiciones(cond_a, cond_b)
@@ -2388,12 +2485,16 @@ def magnitud_bloques(detalle, cond_a=None, cond_b=None):
         # Un area sin actividades estandar ni condiciones igual se emite, con una
         # fila en blanco: la estructura queda a la vista para completarla a mano.
         salida.append((area, filas or [(None, None, None)]))
+    if semanero:
+        salida = [(area, filas) for area, filas in salida
+                  if area in MAGNITUD_AREAS_SEMANERO]
     return salida
 
 
 def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
                          detalle, minutos=None, fecha=None,
-                         cond_a=None, cond_b=None, observaciones=None):
+                         cond_a=None, cond_b=None, observaciones=None,
+                         semanero=False):
     """Arma el Excel de Magnitud de Cambio y lo devuelve como BytesIO.
 
     `detalle` es el que devuelve `clasificar_cambios_codigo_canal` y llega YA
@@ -2407,6 +2508,11 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     son las del producto ENTRANTE (criterio de operaciones, 2026-08-14): el
     formulario es el plan para dejar la linea laminando el destino, asi que son
     sus instrucciones las que hay que cumplir.
+
+    `semanero=True` emite la vista del Semanero: las mismas filas, solo que
+    acotadas a las areas de la linea (ver `MAGNITUD_AREAS_SEMANERO`). Todo lo
+    demas —observaciones, tiempo de cambio y nota— es identico, porque lo que
+    cambia es a QUIEN se le entrega, no que se hace.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -2417,7 +2523,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
                       top=Side(style=arr), bottom=Side(style=aba))
 
     fecha = fecha or datetime.now()
-    bloques = magnitud_bloques(detalle, cond_a, cond_b)
+    bloques = magnitud_bloques(detalle, cond_a, cond_b, semanero=semanero)
     observaciones = [o for o in (observaciones or []) if _txt(o).strip()]
 
     wb = Workbook()
@@ -2518,14 +2624,21 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     ws.cell(ini_tiempo, 3,
             f"Programado: {minutos} minutos" if minutos else "Programado:")
     ws.cell(ini_tiempo + 1, 3, "Real:")
-    merges.append(f"B{ini_tiempo}:B{ini_tiempo + 1}")
+    # `C:E` combinadas en las tres filas que se llenan A MANO. Son el unico lugar
+    # del formulario donde alguien escribe encima del papel —el tiempo real que
+    # tomo el cambio, y la nota de lo que paso— y las divisiones interiores le
+    # parten el renglon en tres. Sin esto la nota se escribe pisando dos lineas
+    # verticales, que es justo lo que el archivo de referencia corrige.
+    merges += [f"B{ini_tiempo}:B{ini_tiempo + 1}",
+               f"C{ini_tiempo}:E{ini_tiempo}",
+               f"C{ini_tiempo + 1}:E{ini_tiempo + 1}"]
 
     # --- Nota ---
     ini_nota = ini_tiempo + 3
     ws.row_dimensions[ini_tiempo + 2].height = 8.0
     ws.cell(ini_nota, 2, "NOTA")
-    merges.append(f"B{ini_nota}:B{ini_nota + 1}")
     ultima = ini_nota + 1
+    merges += [f"B{ini_nota}:B{ultima}", f"C{ini_nota}:E{ultima}"]
 
     for r in (ini_tiempo, ini_tiempo + 1, ini_nota, ultima):
         ws.row_dimensions[r].height = MAG_ALTO_FILA
@@ -2735,16 +2848,32 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
             hojas_dp = cargar_hojas_dp()
             dp_a = construir_diagrama_pase(df_ddp, producto_a, hojas_dp)
             dp_b = construir_diagrama_pase(df_ddp, producto_b, hojas_dp)
+            # Las dos vistas salen del MISMO detalle y del mismo generador: el
+            # toggle elige a quien se le entrega el formulario, no que se
+            # calcula. Si cada vista se armara por su cuenta podrian decir cosas
+            # distintas del mismo cambio, que es la leccion de `cb41c68`.
+            semanero = st.toggle(
+                "Vista Semanero",
+                key="magnitud_semanero",
+                help="Deja solo las areas que el Semanero recorre en la linea "
+                     "(desbaste, los dos trenes y las dos cizallas) y saca las "
+                     "de apoyo: PP1, parrilla, cizalla T4, empaquetado, pozo "
+                     "2000 y grua horquilla. El cambio stand por stand, las "
+                     "observaciones y el tiempo son los mismos.",
+            )
             magnitud = magnitud_cambio_xlsx(
                 producto_a, producto_b, familia_real_a, familia_real_b,
                 detalle_reg, tiempo_ab,
                 cond_a=dp_a["condiciones"], cond_b=dp_b["condiciones"],
                 observaciones=dp_b["observaciones"],
+                semanero=semanero,
             )
             st.download_button(
-                "Descargar Magnitud de Cambio",
+                "Descargar Magnitud del Semanero" if semanero
+                else "Descargar Magnitud de Cambio",
                 data=magnitud,
-                file_name=(f"Magnitud_{nombre_archivo_seguro(producto_a)}"
+                file_name=(f"Magnitud{'_Semanero' if semanero else ''}"
+                           f"_{nombre_archivo_seguro(producto_a)}"
                            f"_a_{nombre_archivo_seguro(producto_b)}.xlsx"),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="magnitud_xlsx",
