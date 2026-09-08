@@ -134,6 +134,32 @@ MAG_EMBUDOS = {
     "Embudo Salida": "embudo salida",
 }
 
+# --- El embudo de la CIZALLA T2 ---
+# Vive en la columna `Embudo Salida` de la fila `A2` del DDP y NO es una guia del
+# stand A2: es del equipo que viene despues. Tres cosas lo demuestran en el dato,
+# y por eso se escribe en su propia area en vez de pegado al stand:
+#   - `A2` es la UNICA posicion donde esa columna trae este dato —151 de los 155
+#     productos— y tiene solo dos valores, `T2-100` y `T2-150`, que se nombran
+#     solos.
+#   - 12 productos traen `T2-150` con `Código Canal = F` en A2: el embudo existe
+#     aunque el stand no. Un dato que sobrevive a la ausencia del stand no es del
+#     stand.
+#   - Los 4 sin dato son los `REDONDO 28/32/36/40 C/R`, los mismos que ocupan 6
+#     posiciones de las 10.
+#
+# Medido sobre los 11.935 pares: 3.952 cambian este embudo, y en 826 de ellos el
+# destino de A2 es pase falso. En esos 826 el cambio NO SE ESCRIBIA EN NINGUNA
+# PARTE, porque `_mag_texto_stand` corta en "queda vacia" antes de anexar
+# embudos. Se recuperan solos al leerlo del DETALLE en el area de la cizalla: el
+# early-return del stand deja de importar.
+#
+# OJO al tocar esto: la misma columna guarda una TERCERA cosa en `M4` —`V - Alta`
+# y `V -Media`, 5 productos— que tampoco es un embudo. Por eso el reparto se ata
+# a la POSICION y no a la columna; mover la columna entera arrastraria esas 5.
+MAG_EMBUDO_T2_POS = "A2"
+MAG_EMBUDO_T2_COL = "Embudo Salida"
+MAG_EMBUDO_T2_AREA = "Cizalla T2"
+
 # Las grafias del VACIO en el DDP. `/` es lo mismo que la celda en blanco: "no
 # lleva esa herramienta en este pase". Lo escribe asi el propio DP —igual que en
 # el codigo de canal (§6.21) y que los guiones de la hoja de condiciones
@@ -2157,15 +2183,12 @@ MAGNITUD_AREAS_POST = (
         ("Apoyo con puente en cambio producto", "2 Operador Empaquetado"),
         ("Carga de camiones", "1 Operador Empaquetado"),
     )),
-    ("Pozo 2000", (
-        ("Limpieza pozo", "2 Operadores Empaquetado"),
-    )),
-    ("Grua Horquilla", (
-        ("Carga de palanquillas en producto entrante", "Operador Grúa Horquilla"),
-        ("5S en zona de acopio de palanquillas", "Operador Grúa Horquilla"),
-        ("Traslado de material para apoyo en trabajos de mantenimiento",
-         "Operador Grúa Horquilla"),
-    )),
+    # `Pozo 2000` y `Grua Horquilla` se sacaron el 2026-09-08 por pedido del
+    # usuario. NO es el mismo criterio que las areas que el equipo borro a mano
+    # en el cambio real (§6.29): aquellas se borraban por cambio y por eso el
+    # generador las sigue emitiendo; estas dos salen del formulario.
+    # El pozo de las 2.000 igual queda cubierto: es una de las 19 zonas de
+    # limpieza de laminilla (`Pozo Sala de Bombas - 2.000`).
 )
 
 # --- Limpieza de laminilla ---
@@ -2207,8 +2230,8 @@ MAGNITUD_TREN_ACABADOR = ("A1", "A2", "A3", "A4", "A5", "A6")
 # --- Vista SEMANERO ---
 # El Semanero es el operador de Equipo de Cambio que confirma que el cambio quedo
 # bien, y solo recorre la linea: desbaste, los dos trenes y las dos cizallas.
-# Las areas de apoyo —PP1 con el horno, parrilla, T4, empaquetado, pozo y grua—
-# tienen su propio responsable y el no las verifica. En un documento que se lleva
+# Las areas de apoyo —PP1 con el horno, parrilla, T4 y empaquetado— tienen su
+# propio responsable y el no las verifica. En un documento que se lleva
 # EN LA MANO (C24) cada fila que no le toca es ruido que hay que saltarse.
 #
 # Es un SUBCONJUNTO de las areas que ya se arman, no un segundo armado: las dos
@@ -2419,27 +2442,72 @@ def _mag_lineas(texto):
     return max(1, math.ceil(len(str(texto)) / MAG_CHARS_POR_LINEA))
 
 
-def _mag_anexar_embudos(texto, d):
+def _mag_frase_embudo(etiqueta, origen, destino):
+    """Como se dice que un embudo cambia. UNA sola redaccion para los dos usos.
+
+    La escriben el texto del stand y la fila de la cizalla T2, y por eso vive
+    aparte: si cada uno la armara, el mismo cambio de embudo se leeria distinto
+    segun en que area cayo.
+
+    El vacio NO se escribe con `MAG_COND_NO_APLICA`: ese guion largo es el
+    separador con que se emiten las condiciones del pie (`Tijera T-3 —
+    Condición: ...`), y `embudo — a 20.9.9` se leeria como una condicion. Ademas
+    no dice nada: "monta" es una instruccion, "de nada a algo" hay que
+    traducirlo mentalmente.
+    """
+    if not origen:
+        return f"monta {etiqueta} {destino}"
+    if not destino:
+        return f"retira {etiqueta} {origen}"
+    return f"{etiqueta} {origen} a {destino}"
+
+
+def _mag_anexar_embudos(texto, d, posicion=None):
     """Anexa al texto del stand los embudos que cambian, con sus valores.
 
     Es la UNICA pieza de guia que se nombra con su valor (ver `MAG_EMBUDOS`).
     Los valores salen de la lista del detalle, no de parsear el `Motivo`: es la
     misma razon por la que `Piezas` y `Parámetros` son listas (§6.19).
+
+    El embudo de la cizalla T2 se salta: el DDP lo guarda en la fila de `A2`
+    pero no es guia de ese stand, asi que se escribe en su propia area (ver
+    `MAG_EMBUDO_T2_POS`). `posicion` es opcional para no romper a un llamador
+    que no la tenga: sin ella no se filtra nada, que es el comportamiento viejo.
     """
     for col, origen, destino in (d.get("Embudos") or []):
+        if posicion == MAG_EMBUDO_T2_POS and col == MAG_EMBUDO_T2_COL:
+            continue
         etiqueta = MAG_EMBUDOS.get(col, "embudo")
-        if not origen:
-            # El vacio NO se escribe con `MAG_COND_NO_APLICA`: ese guion largo es
-            # el separador con que se emiten las condiciones del pie
-            # (`Tijera T-3 — Condición: ...`), y `embudo — a 20.9.9` se leeria
-            # como una condicion. Ademas no dice nada: "monta" es una
-            # instruccion, "de nada a algo" hay que traducirlo mentalmente.
-            texto += f" · monta {etiqueta} {destino}"
-        elif not destino:
-            texto += f" · retira {etiqueta} {origen}"
-        else:
-            texto += f" · {etiqueta} {origen} a {destino}"
+        texto += " · " + _mag_frase_embudo(etiqueta, origen, destino)
     return texto
+
+
+def _mag_filas_cizalla_t2(detalle_por_pos):
+    """La fila del embudo de la cizalla T2, cuando cambia.
+
+    Sale del detalle YA CALCULADO —la clave `Embudos` de la fila de `A2`—, no de
+    una segunda lectura del DDP: eso seria dos lecturas del mismo dato y es como
+    la app termina contradiciendose a si misma (§6.24).
+
+    Y se lee del DETALLE, no del texto del stand, a proposito: eso es lo que
+    recupera los 826 pares en que `A2` queda en pase falso, donde
+    `_mag_texto_stand` corta antes de llegar a los embudos.
+
+    Solo se escribe cuando cambia (criterio del usuario, 2026-09-08). Si no
+    cambia, el area sigue saliendo con su fila en blanco, como hasta ahora.
+    """
+    d = detalle_por_pos.get(MAG_EMBUDO_T2_POS)
+    if not d:
+        return []
+    filas = []
+    for col, origen, destino in (d.get("Embudos") or []):
+        if col != MAG_EMBUDO_T2_COL:
+            continue
+        # "salida" no significa nada aca: en su propia area el embudo es el de
+        # la cizalla, no el de un lado del stand.
+        frase = _mag_frase_embudo("embudo", origen, destino)
+        filas.append((None, frase[0].upper() + frase[1:], RESPONSABLE_TREN))
+    return filas
 
 
 def _mag_texto_stand(posicion, detalle_por_pos):
@@ -2485,7 +2553,7 @@ def _mag_texto_stand(posicion, detalle_por_pos):
             texto += " · cambio de guía"
         elif otros:
             texto += " · regulación de material"
-        return _mag_anexar_embudos(texto, d)
+        return _mag_anexar_embudos(texto, d, posicion)
 
     texto = f"{origen} a {destino}"
     if _es_pase_falso(destino):
@@ -2503,7 +2571,7 @@ def _mag_texto_stand(posicion, detalle_por_pos):
     # -> ANGULO 30 x 3 pone `RP 55 a RP 50`, a secas). Anotarlo en cada fila
     # agrega una linea de ruido al formulario sin decir nada que no se sepa, y
     # el formulario ya esta largo (C24). Solo se anota la excepcion.
-    return _mag_anexar_embudos(texto, d)
+    return _mag_anexar_embudos(texto, d, posicion)
 
 
 def _mag_filas_tren(posiciones, detalle_por_pos):
@@ -2549,7 +2617,12 @@ def magnitud_bloques(detalle, cond_a=None, cond_b=None, semanero=False):
         if area == "Cizalla T3":
             bloques.append(("Tren Acabador",
                             _mag_filas_tren(MAGNITUD_TREN_ACABADOR, por_pos)))
-        bloques.append((area, [(None, a, r) for a, r in actividades]))
+        filas = [(None, a, r) for a, r in actividades]
+        if area == MAG_EMBUDO_T2_AREA:
+            # El DDP guarda este embudo en la fila de `A2`; el area donde se
+            # trabaja es esta.
+            filas += _mag_filas_cizalla_t2(por_pos)
+        bloques.append((area, filas))
 
     # La limpieza de laminilla va al final y es transversal: no pertenece a un
     # area de la linea, se decide mirando el cambio completo. Sin responsable
@@ -2944,8 +3017,8 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                 key="magnitud_semanero",
                 help="Deja solo las areas que el Semanero recorre en la linea "
                      "(desbaste, los dos trenes y las dos cizallas) y saca las "
-                     "de apoyo: PP1, parrilla, cizalla T4, empaquetado, pozo "
-                     "2000 y grua horquilla. El cambio stand por stand, las "
+                     "de apoyo: PP1, parrilla, cizalla T4 y empaquetado. El "
+                     "cambio stand por stand, las "
                      "observaciones y el tiempo son los mismos.",
             )
             magnitud = magnitud_cambio_xlsx(
