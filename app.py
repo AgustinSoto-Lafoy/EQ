@@ -2098,18 +2098,22 @@ MAGNITUD_AREAS_PRE = (
         ("Apoyo en cambio de producto", "Operador Púlpito Principal"),
         ("Ingresar muestras en horno para quema de canal", "Operador Horno"),
         ("Apoyo en quema de canal", "Operador Horno"),
+        # Lo pidio operaciones el 2026-09-08, despues de ejecutar un cambio real
+        # con el equipo: faltaba y hubo que anotarlo a mano.
+        ("Escoriado de horno", "Operador Horno"),
     )),
 )
 
 MAGNITUD_DESBASTE = (
     ("Calibración de cilindros", "Operador Desbaste"),
+    ("Revisión de cajones", "Operador Desbaste"),
 )
 
 # El Tren Acabador se intercala antes de `Cizalla T3`, igual que en el ejemplo:
 # el formulario sigue el recorrido de la linea.
 MAGNITUD_AREAS_POST = (
     ("Entrada A1", (
-        ("Abrir polines entrada A1 para producto", RESPONSABLE_TREN),
+        ("Regular polines entrada A1 para producto", RESPONSABLE_TREN),
     )),
     ("Cizalla T2", ()),
     ("Cizalla T3", (
@@ -2123,6 +2127,7 @@ MAGNITUD_AREAS_POST = (
     ("Cizalla T4", (
         ("Limpieza despuntes parrilla y gripador", "2 Operadores T4"),
         ("Cambio de cuchillos", "Operador T4"),
+        ("Verificar cambio de condición en cuchilla", "Operador T4"),
     )),
     ("Empaquetado", (
         ("Apoyo con puente en cambio producto", "2 Operador Empaquetado"),
@@ -2137,6 +2142,36 @@ MAGNITUD_AREAS_POST = (
         ("Traslado de material para apoyo en trabajos de mantenimiento",
          "Operador Grúa Horquilla"),
     )),
+)
+
+# --- Limpieza de laminilla ---
+# Las 19 zonas de `respaldo data\Magnitud de Cambio\LIMPIEZA DE LAMINILLA.xlsx`,
+# en el orden de esa planilla (que es el recorrido de la linea, no alfabetico).
+#
+# Van TODAS y siempre, aunque en un cambio dado se toquen tres: el criterio del
+# usuario del 2026-09-08 es que el formulario "abarque todos los puntos y
+# nosotros determinemos que vamos a hacer en base al contexto". Es la misma razon
+# por la que se emiten las 10 posiciones del tren aunque no cambien (§6.24): en
+# un formulario de papel, lo que no esta escrito no se ve, y decidir sobre una
+# lista completa no es lo mismo que acordarse de lo que falta.
+#
+# Se escribe SOLO la zona. La frecuencia, el bloqueo y el modo (manual / clamp
+# shell) se quedan en la planilla: la Magnitud es un resumen (C24) y con el
+# bloqueo varias filas pasaban a dos lineas.
+#
+# Salen SIN responsable a proposito, y eso las hace la excepcion al check de
+# "ninguna actividad sin responsable": no son actividades asignadas, son puntos
+# que el equipo marca segun el contexto del cambio, y quien los toma cambia de
+# cambio en cambio (en el cambio real del 2026-09-08 fueron nombres propios
+# distintos por punto). Escribir un cargo fijo seria inventar el dato.
+MAGNITUD_LIMPIEZA_AREA = "Limpieza de laminilla"
+MAGNITUD_LIMPIEZA_LAMINILLA = (
+    "Mesa de Carga", "Ripador", "Rodillos Ripador", "Rodillo Salida 7mo Pase",
+    "Rodillos Mesa Fija", "Desbaste Stand", "Mesa Basculante", "Mesa Fija",
+    "Tren Medio", "Tren Acabador", "Pozo T1, T2 y T3", "Virador-Curva",
+    "Parrilla", "Sala de Retro Lavado EQ Cambio", "Volcador Stand EQ Cambio",
+    "Pozo Desbaste", "Pozo Sala de Bombas - 2.000",
+    "Pozo Tren Acabador - A3 y A4", "Empaquetado",
 )
 
 # Reparto del tren en las dos areas del formulario. Se recorren tal cual, que ya
@@ -2157,8 +2192,13 @@ MAGNITUD_TREN_ACABADOR = ("A1", "A2", "A3", "A4", "A5", "A6")
 # decir cosas distintas del mismo cambio. Los nombres tienen que existir tal cual
 # en `MAGNITUD_AREAS_PRE` / `MAGNITUD_AREAS_POST` o el area desaparece sin avisar
 # —lo cubre `verificar_magnitud_cambio.py` §9—.
+#
+# La limpieza de laminilla SI la ve el Semanero: es el equipo el que decide y
+# marca que puntos toca en cada cambio, y dos de las zonas son suyas (`Sala de
+# Retro Lavado EQ Cambio`, `Volcador Stand EQ Cambio`).
 MAGNITUD_AREAS_SEMANERO = ("Desbaste", "Tren Medio", "Entrada A1", "Cizalla T2",
-                           "Tren Acabador", "Cizalla T3")
+                           "Tren Acabador", "Cizalla T3",
+                           MAGNITUD_LIMPIEZA_AREA)
 
 # --- Condiciones de laminacion del pie del Diagrama de Pase ---
 # Viven en la hoja `Condiciones` del Consolidado (Producto · Grupo · Parametro ·
@@ -2329,7 +2369,21 @@ MAG_TAM = 12
 MAG_AZUL_TITULO = "2E75B6"
 MAG_AZUL_ENCABEZADO = "9DC3E6"
 MAG_AZUL_SUAVE = "DEEBF7"
-MAG_ANCHOS = {"A": 3.0, "B": 17.7, "C": 6.5, "D": 61.1, "E": 39.9}
+# B=Area, C=STD, D=Actividades, E=Hora, F=Responsable. La `Hora` se agrego el
+# 2026-09-08: el equipo la anota a mano al ejecutar el cambio (8:30, "8:30 -
+# 9:30"), asi que el generador la deja SIEMPRE vacia — no hay dato que poner.
+#
+# Sale a costa de `Responsable`, que baja de 39,9 a 33,0, y no del ancho total:
+# el limite de este documento es el ancho, y sumar una columna sin compensar
+# bajaba el techo de letra impresa de 10,29 a 9,37 pt. Con el reparto de aca
+# queda en 10,14, o sea la columna es practicamente gratis. 33 sigue cubriendo
+# el responsable mas largo del formulario ("2 Operador Empaquetado", 22).
+MAG_ANCHOS = {"A": 3.0, "B": 17.7, "C": 6.5, "D": 61.1, "E": 8.0, "F": 33.0}
+# Ultima columna del formulario. Se usa en los bordes, el area de impresion y las
+# combinaciones del pie: estaba escrito `5` en cinco lugares distintos y agregar
+# una columna obligaba a encontrarlos todos.
+MAG_COL_FIN = 6
+MAG_COL_FIN_L = "F"
 MAG_ALTO_FILA = 18.0
 # Caracteres que caben en la columna D antes de partir en dos lineas. La columna
 # mide 61.1 y se deja margen: la unidad de ancho de Excel no es un caracter.
@@ -2473,6 +2527,12 @@ def magnitud_bloques(detalle, cond_a=None, cond_b=None, semanero=False):
                             _mag_filas_tren(MAGNITUD_TREN_ACABADOR, por_pos)))
         bloques.append((area, [(None, a, r) for a, r in actividades]))
 
+    # La limpieza de laminilla va al final y es transversal: no pertenece a un
+    # area de la linea, se decide mirando el cambio completo. Sin responsable
+    # (ver `MAGNITUD_LIMPIEZA_LAMINILLA`).
+    bloques.append((MAGNITUD_LIMPIEZA_AREA,
+                    [(None, zona, None) for zona in MAGNITUD_LIMPIEZA_LAMINILLA]))
+
     # Las condiciones se agregan al FINAL de su area, ya armadas todas las areas:
     # asi ninguna se puede quedar sin recibirlas por estar construida en otra
     # rama de arriba. Van despues de las actividades porque responden a otra
@@ -2543,7 +2603,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
 
     # Las combinaciones se juntan aca y se aplican AL FINAL, despues de pintar:
     # ver el comentario del bloque de combinaciones, mas abajo.
-    merges = ["B2:E2"]
+    merges = [f"B2:{MAG_COL_FIN_L}2"]
 
     # --- Titulo ---
     # El relleno y la fuente van solo en el ancla: un area combinada se dibuja
@@ -2556,7 +2616,8 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     ws.row_dimensions[2].height = MAG_ALTO_FILA
 
     # --- Encabezado ---
-    for col, texto in ((2, "Área"), (3, None), (4, "Actividades"), (5, "Responsable")):
+    for col, texto in ((2, "Área"), (3, "STD"), (4, "Actividades"),
+                       (5, "Hora"), (6, "Responsable")):
         c = ws.cell(3, col, texto)
         c.font = negrita
         c.fill = PatternFill("solid", fgColor=MAG_AZUL_ENCABEZADO)
@@ -2570,8 +2631,10 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
         for std, actividad, responsable in filas:
             ws.cell(fila, 3, std).alignment = centro
             ws.cell(fila, 4, actividad).alignment = izq
-            ws.cell(fila, 5, responsable).alignment = izq
-            for col in range(2, 6):
+            # La `Hora` (col 5) queda vacia: la anota a mano quien ejecuta
+            # el cambio. El responsable corrio a la 6.
+            ws.cell(fila, 6, responsable).alignment = izq
+            for col in range(2, MAG_COL_FIN + 1):
                 ws.cell(fila, col).font = base
             # La altura crece solo si el texto no cabe en una linea. El ejemplo
             # usa 18 pt fijos, pero ahi los textos son cortos; con wrap y altura
@@ -2604,7 +2667,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
             r = ini_obs + i
             ws.cell(r, 4, _txt(texto).strip()).alignment = izq
             ws.row_dimensions[r].height = MAG_ALTO_FILA * _mag_lineas(texto)
-            for col in range(2, 6):
+            for col in range(2, MAG_COL_FIN + 1):
                 ws.cell(r, col).font = base
         fin_obs = ini_obs + len(observaciones) - 1
         rotulo = ws.cell(ini_obs, 2, "Observaciones DP (producto entrante)")
@@ -2624,25 +2687,25 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     ws.cell(ini_tiempo, 3,
             f"Programado: {minutos} minutos" if minutos else "Programado:")
     ws.cell(ini_tiempo + 1, 3, "Real:")
-    # `C:E` combinadas en las tres filas que se llenan A MANO. Son el unico lugar
+    # `C:F` combinadas en las tres filas que se llenan A MANO. Son el unico lugar
     # del formulario donde alguien escribe encima del papel —el tiempo real que
     # tomo el cambio, y la nota de lo que paso— y las divisiones interiores le
     # parten el renglon en tres. Sin esto la nota se escribe pisando dos lineas
     # verticales, que es justo lo que el archivo de referencia corrige.
     merges += [f"B{ini_tiempo}:B{ini_tiempo + 1}",
-               f"C{ini_tiempo}:E{ini_tiempo}",
-               f"C{ini_tiempo + 1}:E{ini_tiempo + 1}"]
+               f"C{ini_tiempo}:{MAG_COL_FIN_L}{ini_tiempo}",
+               f"C{ini_tiempo + 1}:{MAG_COL_FIN_L}{ini_tiempo + 1}"]
 
     # --- Nota ---
     ini_nota = ini_tiempo + 3
     ws.row_dimensions[ini_tiempo + 2].height = 8.0
     ws.cell(ini_nota, 2, "NOTA")
     ultima = ini_nota + 1
-    merges += [f"B{ini_nota}:B{ultima}", f"C{ini_nota}:E{ultima}"]
+    merges += [f"B{ini_nota}:B{ultima}", f"C{ini_nota}:{MAG_COL_FIN_L}{ultima}"]
 
     for r in (ini_tiempo, ini_tiempo + 1, ini_nota, ultima):
         ws.row_dimensions[r].height = MAG_ALTO_FILA
-        for col in range(2, 6):
+        for col in range(2, MAG_COL_FIN + 1):
             ws.cell(r, col).font = base
             ws.cell(r, col).alignment = izq
     for r in (ini_tiempo, ini_nota):
@@ -2656,10 +2719,10 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     bordes += [(ini_tiempo, ini_tiempo + 1), (ini_nota, ultima)]
     for arriba, abajo in bordes:
         for r in range(arriba, abajo + 1):
-            for col in range(2, 6):
+            for col in range(2, MAG_COL_FIN + 1):
                 ws.cell(r, col).border = borde(
                     "medium" if col == 2 else "thin",
-                    "medium" if col == 5 else "thin",
+                    "medium" if col == MAG_COL_FIN else "thin",
                     "medium" if r == arriba else "thin",
                     "medium" if r == abajo else "thin",
                 )
@@ -2693,7 +2756,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
-    ws.print_area = f"B2:E{ultima}"
+    ws.print_area = f"B2:{MAG_COL_FIN_L}{ultima}"
 
     buf = io.BytesIO()
     wb.save(buf)
