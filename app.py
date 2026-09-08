@@ -3558,7 +3558,22 @@ def mostrar_resumen_maestranza(df_ddp, df_rendimiento=None):
                 productos_sin_ddp = list(df_programa["Nombre STD"].unique())
                 audit_posiciones = []
                 st.warning("No se encontraron columnas 'STD' o 'Código Canal' para análisis detallado")
-        
+
+        # La letra de familia sale del propio DDP (columna `Familia`), no se infiere
+        # del nombre del producto. Va acá y no dentro de una rama porque `df_resumen`
+        # se arma en tres caminos distintos y las tres deben traerla.
+        if "Familia" in df_ddp.columns and "Familia" not in df_resumen.columns:
+            familia_por_producto = (
+                df_ddp.dropna(subset=["Familia"])
+                .drop_duplicates(subset=["Producto"], keep="first")
+                .set_index("Producto")["Familia"]
+            )
+            df_resumen = df_resumen.copy()
+            df_resumen.insert(
+                1, "Familia",
+                df_resumen["Nombre STD"].map(familia_por_producto).fillna("").astype(str)
+            )
+
         # Mostrar métricas generales
         try:
             total_toneladas = df_resumen["Toneladas"].sum()
