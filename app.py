@@ -134,11 +134,19 @@ MAG_EMBUDOS = {
     "Embudo Salida": "embudo salida",
 }
 
-# `/` es el mismo "no lleva embudo" que la celda en blanco: asi lo escribe el DP,
-# igual que en el codigo de canal (§6.21). Son 38 celdas en Entrada y 3 en
-# Salida. Sin unificarlos, pasar de blanco a `/` se escribe como un cambio de
-# embudo que no existe —medido: 1.436 de 119.350 posiciones—.
-MAG_EMBUDO_VACIO = frozenset({"", "/", "-", "--", "---", "----"})
+# Las grafias del VACIO en el DDP. `/` es lo mismo que la celda en blanco: "no
+# lleva esa herramienta en este pase". Lo escribe asi el propio DP —igual que en
+# el codigo de canal (§6.21) y que los guiones de la hoja de condiciones
+# (§6.26)—, y no es un detalle de una columna: son 11 columnas del Consolidado,
+# 7 de ellas piezas de guia.
+#
+# Tratarlas como valores distintos hacia que pasar de blanco a `/` se contara
+# como una diferencia real. Medido sobre las 20.315 posiciones que comparten
+# codigo: 955 regulaciones que no existen, de las cuales 568 se reportaban como
+# Nivel "Fuerte", o sea pidiendo cambiar una guia que nadie tiene que tocar. Las
+# columnas que mas lo causaban son `Caja Guía Entrada` y `Caja Guía Salida`
+# (488 cada una), no el embudo (146 + 54).
+DDP_VACIOS = frozenset({"", "/", "-", "--", "---", "----"})
 
 # Etiquetas de nivel. Son centinelas: se comparan en `contar_regulaciones` y se
 # muestran en tabla. Cambiar el texto obliga a cambiar ambos lados a la vez.
@@ -621,31 +629,47 @@ def comparar_desbaste(df_desbaste, familia_a, familia_b):
         logger.error(f"Error en comparar_desbaste: {str(e)}")
         return pd.DataFrame()
 
+def _valor_celda(valor):
+    """El valor de una celda del DDP, con TODAS las grafias del vacio unificadas.
+
+    Devuelve '' para el nulo, la celda en blanco y los `/` y guiones con que el
+    DP escribe "no lleva esta herramienta" (ver `DDP_VACIOS`). Es la unica
+    definicion de "vacio" del DDP: antes convivian dos —`pd.isna` en la
+    comparacion de parametros y esta lista en los embudos— y por eso la app se
+    contradecia, contando 955 diferencias que para el resto del codigo no
+    existian.
+    """
+    if valor is None:
+        return ""
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass                      # no es escalar: se trata como texto
+    texto = str(valor).strip()
+    return "" if texto in DDP_VACIOS else texto
+
+
 def _parametros_cambiados(row_a, row_b, columnas):
     """Columnas cuyo valor difiere entre las dos filas.
 
-    Dos nulos NO son un cambio: en este DDP el nulo es semántico ("no hay esa
-    herramienta en el pase") y llega al 99% en algunas columnas.
+    Dos vacios NO son un cambio, y `/` es un vacio: en este DDP la celta sin
+    dato es semántica ("no hay esa herramienta en el pase") y llega al 99% en
+    algunas columnas, pero el DP escribe esa misma ausencia de varias formas.
+    Comparar las grafias en vez de los valores reportaba 955 regulaciones que no
+    existen, 568 de ellas con Nivel "Fuerte" —o sea pidiendo cambiar una guia
+    que nadie tiene que tocar—. Ver `DDP_VACIOS`.
+
+    La comparacion se hace sobre el valor NORMALIZADO y no sobre el crudo: si
+    solo se saltaran los dos-vacios, `/` contra `-` seguiria contando.
     """
     cambiados = []
     for col in columnas:
-        val_a = row_a.get(col)
-        val_b = row_b.get(col)
-        if (val_a is None or pd.isna(val_a)) and (val_b is None or pd.isna(val_b)):
-            continue
-        try:
-            cambia = val_a != val_b
-        except (TypeError, ValueError):
-            cambia = str(val_a) != str(val_b)
-        if cambia:
+        val_a = _valor_celda(row_a.get(col))
+        val_b = _valor_celda(row_b.get(col))
+        if val_a != val_b:
             cambiados.append(str(col))
     return cambiados
-
-
-def _valor_embudo(valor):
-    """El embudo de una celda, con todas las grafias del vacio unificadas a ''."""
-    texto = "" if valor is None or (isinstance(valor, float) and pd.isna(valor)) else str(valor).strip()
-    return "" if texto in MAG_EMBUDO_VACIO else texto
 
 
 def _embudos_cambiados(row_a, row_b):
@@ -654,13 +678,13 @@ def _embudos_cambiados(row_a, row_b):
     Se calcula ACA, junto al resto de la comparacion de la posicion, y viaja en
     el detalle: si la Magnitud lo leyera por su cuenta del DDP tendriamos dos
     lecturas del mismo dato, que es como la app termina contradiciendose a si
-    misma (§6.24). El vacio se normaliza con `_valor_embudo`, asi que blanco y
+    misma (§6.24). El vacio se normaliza con `_valor_celda`, asi que blanco y
     `/` no cuentan como cambio.
     """
     cambios = []
     for col in MAG_EMBUDOS:
-        origen = _valor_embudo(row_a.get(col))
-        destino = _valor_embudo(row_b.get(col))
+        origen = _valor_celda(row_a.get(col))
+        destino = _valor_celda(row_b.get(col))
         if origen != destino:
             cambios.append((col, origen, destino))
     return cambios
