@@ -2240,12 +2240,14 @@ MAGNITUD_TREN_ACABADOR = ("A1", "A2", "A3", "A4", "A5", "A6")
 # en `MAGNITUD_AREAS_PRE` / `MAGNITUD_AREAS_POST` o el area desaparece sin avisar
 # —lo cubre `verificar_magnitud_cambio.py` §9—.
 #
-# La limpieza de laminilla SI la ve el Semanero: es el equipo el que decide y
-# marca que puntos toca en cada cambio, y dos de las zonas son suyas (`Sala de
-# Retro Lavado EQ Cambio`, `Volcador Stand EQ Cambio`).
+# La limpieza de laminilla NO va en esta vista (criterio del usuario,
+# 2026-09-09): la coordina quien lleva la Magnitud completa, y en la hoja del
+# Semanero eran 19 filas que el no marca. Por lo mismo esta vista sale sin las
+# columnas `Hora` ni `Responsable` (ver `MAG_ANCHOS_SEM`): el Semanero es UNO y
+# recorre la linea verificando, asi que anotar a quien le toca cada fila —o a
+# que hora— es la pregunta del coordinador, no la suya.
 MAGNITUD_AREAS_SEMANERO = ("Desbaste", "Tren Medio", "Entrada A1", "Cizalla T2",
-                           "Tren Acabador", "Cizalla T3",
-                           MAGNITUD_LIMPIEZA_AREA)
+                           "Tren Acabador", "Cizalla T3")
 
 # --- Condiciones de laminacion del pie del Diagrama de Pase ---
 # Viven en la hoja `Condiciones` del Consolidado (Producto · Grupo · Parametro ·
@@ -2436,10 +2438,25 @@ MAG_ALTO_FILA = 18.0
 # mide 61.1 y se deja margen: la unidad de ancho de Excel no es un caracter.
 MAG_CHARS_POR_LINEA = 68
 
+# --- La misma tabla, en la vista del Semanero ---
+# Va SIN `Hora` ni `Responsable`, asi que el formulario termina en `D` y quedan
+# libres 41,0 unidades de ancho. NO se reparten enteras a `Actividades`: el
+# techo de la letra impresa lo pone el ancho de la hoja, y pasado ese punto
+# ensanchar la columna ya no da tamano, lo quita. Con `D` en 83,0 el bloque
+# B:D mide justo lo que entra en carta al 100%, o sea la letra sale al maximo
+# posible (12 pt) y de paso el texto envuelve menos que en la vista completa.
+# Ancho y caracteres por linea van JUNTOS: `MAG_CHARS_POR_LINEA_SEM` es 68
+# escalado por 83,0/61,1, y desacoplarlos hace que la altura de las filas se
+# calcule sobre una columna que no es la que se imprime.
+MAG_ANCHOS_SEM = {"A": 3.0, "B": 17.7, "C": 6.5, "D": 83.0}
+MAG_COL_FIN_SEM = 4
+MAG_COL_FIN_SEM_L = "D"
+MAG_CHARS_POR_LINEA_SEM = 92
 
-def _mag_lineas(texto):
+
+def _mag_lineas(texto, chars=MAG_CHARS_POR_LINEA):
     """Cuantas lineas ocupa el texto en la columna de actividades."""
-    return max(1, math.ceil(len(str(texto)) / MAG_CHARS_POR_LINEA))
+    return max(1, math.ceil(len(str(texto)) / chars))
 
 
 def _mag_frase_embudo(etiqueta, origen, destino):
@@ -2666,10 +2683,12 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     formulario es el plan para dejar la linea laminando el destino, asi que son
     sus instrucciones las que hay que cumplir.
 
-    `semanero=True` emite la vista del Semanero: las mismas filas, solo que
-    acotadas a las areas de la linea (ver `MAGNITUD_AREAS_SEMANERO`). Todo lo
-    demas —observaciones, tiempo de cambio y nota— es identico, porque lo que
-    cambia es a QUIEN se le entrega, no que se hace.
+    `semanero=True` emite la vista del Semanero: las mismas filas de siempre,
+    acotadas a las areas de la linea (ver `MAGNITUD_AREAS_SEMANERO`) y sin las
+    columnas `Hora` ni `Responsable`. El contenido de cada fila —el texto del
+    stand, las condiciones, las observaciones, el tiempo y la nota— es
+    IDENTICO: lo que cambia es a quien se le entrega, no que se hace, y por eso
+    las dos vistas salen del mismo armado.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -2681,6 +2700,16 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
 
     fecha = fecha or datetime.now()
     bloques = magnitud_bloques(detalle, cond_a, cond_b, semanero=semanero)
+    # La vista del Semanero es la MISMA tabla con dos columnas menos, no otro
+    # formulario: lo unico que cambia es el ancho y donde termina la fila. De
+    # estas cuatro variables cuelgan los bordes, el area de impresion, las
+    # combinaciones del pie y el alto de cada fila, asi que se eligen una sola
+    # vez aca —escritas a mano en cada sitio, agregar o quitar una columna
+    # obliga a encontrarlos todos (la leccion de `MAG_COL_FIN`)—.
+    anchos = MAG_ANCHOS_SEM if semanero else MAG_ANCHOS
+    col_fin = MAG_COL_FIN_SEM if semanero else MAG_COL_FIN
+    col_fin_l = MAG_COL_FIN_SEM_L if semanero else MAG_COL_FIN_L
+    chars = MAG_CHARS_POR_LINEA_SEM if semanero else MAG_CHARS_POR_LINEA
     observaciones = [o for o in (observaciones or []) if _txt(o).strip()]
 
     wb = Workbook()
@@ -2689,7 +2718,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     ws.title = f"{familia_a}{familia_b}"[:31] or "Magnitud"
     ws.sheet_view.showGridLines = False
 
-    for col, ancho in MAG_ANCHOS.items():
+    for col, ancho in anchos.items():
         ws.column_dimensions[col].width = ancho
 
     base = Font(name=MAG_FUENTE, size=MAG_TAM)
@@ -2700,7 +2729,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
 
     # Las combinaciones se juntan aca y se aplican AL FINAL, despues de pintar:
     # ver el comentario del bloque de combinaciones, mas abajo.
-    merges = [f"B2:{MAG_COL_FIN_L}2"]
+    merges = [f"B2:{col_fin_l}2"]
 
     # --- Titulo ---
     # El relleno y la fuente van solo en el ancla: un area combinada se dibuja
@@ -2715,6 +2744,10 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     # --- Encabezado ---
     for col, texto in ((2, "Área"), (3, "STD"), (4, "Actividades"),
                        (5, "Hora"), (6, "Responsable")):
+        # El encabezado se corta donde se corta la tabla. Se filtra por
+        # `col_fin` en vez de escribir dos listas: dos listas se desincronizan.
+        if col > col_fin:
+            continue
         c = ws.cell(3, col, texto)
         c.font = negrita
         c.fill = PatternFill("solid", fgColor=MAG_AZUL_ENCABEZADO)
@@ -2729,15 +2762,19 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
             ws.cell(fila, 3, std).alignment = centro
             ws.cell(fila, 4, actividad).alignment = izq
             # La `Hora` (col 5) queda vacia: la anota a mano quien ejecuta
-            # el cambio. El responsable corrio a la 6.
-            ws.cell(fila, 6, responsable).alignment = izq
-            for col in range(2, MAG_COL_FIN + 1):
+            # el cambio. El responsable corrio a la 6. En la vista del Semanero
+            # no existe ninguna de las dos: el `responsable` sigue viajando en
+            # la fila —las dos vistas se arman igual (§6.28)— y aca no se
+            # escribe.
+            if not semanero:
+                ws.cell(fila, 6, responsable).alignment = izq
+            for col in range(2, col_fin + 1):
                 ws.cell(fila, col).font = base
             # La altura crece solo si el texto no cabe en una linea. El ejemplo
             # usa 18 pt fijos, pero ahi los textos son cortos; con wrap y altura
             # fija un texto largo se corta y no se ve que falta.
             ws.row_dimensions[fila].height = (
-                MAG_ALTO_FILA * _mag_lineas(actividad) if actividad else MAG_ALTO_FILA
+                MAG_ALTO_FILA * _mag_lineas(actividad, chars) if actividad else MAG_ALTO_FILA
             )
             fila += 1
         ws.cell(inicio, 2, area).alignment = centro
@@ -2763,8 +2800,8 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
         for i, texto in enumerate(observaciones):
             r = ini_obs + i
             ws.cell(r, 4, _txt(texto).strip()).alignment = izq
-            ws.row_dimensions[r].height = MAG_ALTO_FILA * _mag_lineas(texto)
-            for col in range(2, MAG_COL_FIN + 1):
+            ws.row_dimensions[r].height = MAG_ALTO_FILA * _mag_lineas(texto, chars)
+            for col in range(2, col_fin + 1):
                 ws.cell(r, col).font = base
         fin_obs = ini_obs + len(observaciones) - 1
         rotulo = ws.cell(ini_obs, 2, "Observaciones DP (producto entrante)")
@@ -2790,19 +2827,19 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     # parten el renglon en tres. Sin esto la nota se escribe pisando dos lineas
     # verticales, que es justo lo que el archivo de referencia corrige.
     merges += [f"B{ini_tiempo}:B{ini_tiempo + 1}",
-               f"C{ini_tiempo}:{MAG_COL_FIN_L}{ini_tiempo}",
-               f"C{ini_tiempo + 1}:{MAG_COL_FIN_L}{ini_tiempo + 1}"]
+               f"C{ini_tiempo}:{col_fin_l}{ini_tiempo}",
+               f"C{ini_tiempo + 1}:{col_fin_l}{ini_tiempo + 1}"]
 
     # --- Nota ---
     ini_nota = ini_tiempo + 3
     ws.row_dimensions[ini_tiempo + 2].height = 8.0
     ws.cell(ini_nota, 2, "NOTA")
     ultima = ini_nota + 1
-    merges += [f"B{ini_nota}:B{ultima}", f"C{ini_nota}:{MAG_COL_FIN_L}{ultima}"]
+    merges += [f"B{ini_nota}:B{ultima}", f"C{ini_nota}:{col_fin_l}{ultima}"]
 
     for r in (ini_tiempo, ini_tiempo + 1, ini_nota, ultima):
         ws.row_dimensions[r].height = MAG_ALTO_FILA
-        for col in range(2, MAG_COL_FIN + 1):
+        for col in range(2, col_fin + 1):
             ws.cell(r, col).font = base
             ws.cell(r, col).alignment = izq
     for r in (ini_tiempo, ini_nota):
@@ -2816,10 +2853,10 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     bordes += [(ini_tiempo, ini_tiempo + 1), (ini_nota, ultima)]
     for arriba, abajo in bordes:
         for r in range(arriba, abajo + 1):
-            for col in range(2, MAG_COL_FIN + 1):
+            for col in range(2, col_fin + 1):
                 ws.cell(r, col).border = borde(
                     "medium" if col == 2 else "thin",
-                    "medium" if col == MAG_COL_FIN else "thin",
+                    "medium" if col == col_fin else "thin",
                     "medium" if r == arriba else "thin",
                     "medium" if r == abajo else "thin",
                 )
@@ -2853,7 +2890,7 @@ def magnitud_cambio_xlsx(producto_a, producto_b, familia_a, familia_b,
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
-    ws.print_area = f"B2:{MAG_COL_FIN_L}{ultima}"
+    ws.print_area = f"B2:{col_fin_l}{ultima}"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -3017,8 +3054,9 @@ def mostrar_comparacion_productos(df_ddp, df_tiempo, df_desbaste, producto_a, pr
                 key="magnitud_semanero",
                 help="Deja solo las areas que el Semanero recorre en la linea "
                      "(desbaste, los dos trenes y las dos cizallas) y saca las "
-                     "de apoyo: PP1, parrilla, cizalla T4 y empaquetado. El "
-                     "cambio stand por stand, las "
+                     "de apoyo —PP1, parrilla, cizalla T4 y empaquetado— y la "
+                     "limpieza de laminilla. Sale ademas sin las columnas Hora "
+                     "y Responsable. El cambio stand por stand, las "
                      "observaciones y el tiempo son los mismos.",
             )
             magnitud = magnitud_cambio_xlsx(
